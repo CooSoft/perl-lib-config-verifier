@@ -1,6 +1,6 @@
 ##############################################################################
 #
-#   File Name    - SyntaxChecker.pm
+#   File Name    - Verifier.pm
 #
 #   Description  - A module for checking the domain specific syntax of data
 #                  with regards to the structure of that data and the basic
@@ -11,11 +11,33 @@
 #                  is a correct enumeration or that a number is an integer or
 #                  a float but not the value of that number against a range.
 #
+#   Authors      - A.E.Cooper.
+#
+#   Legal Stuff  - Copyright (c) 2024 Anthony Edward Cooper
+#                  <aecooper@cpan.org>.
+#
+#                  This library is free software; you can redistribute it
+#                  and/or modify it under the terms of the GNU Lesser General
+#                  Public License as published by the Free Software
+#                  Foundation; either version 3 of the License, or (at your
+#                  option) any later version.
+#
+#                  This library is distributed in the hope that it will be
+#                  useful, but WITHOUT ANY WARRANTY; without even the implied
+#                  warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+#                  PURPOSE. See the GNU Lesser General Public License for
+#                  more details.
+#
+#                  You should have received a copy of the GNU Lesser General
+#                  Public License along with this library; if not, write to
+#                  the Free Software Foundation, Inc., 59 Temple Place - Suite
+#                  330, Boston, MA 02111-1307 USA.
+#
 ##############################################################################
 #
 ##############################################################################
 #
-#   Package      - Data::SyntaxChecker
+#   Package      - Config::Verifier
 #
 #   Description  - See above.
 #
@@ -25,11 +47,11 @@
 
 # ***** PACKAGE DECLARATION *****
 
-package Data::SyntaxChecker;
+package Config::Verifier;
 
 # ***** DIRECTIVES *****
 
-require 5.0.12000;
+require 5.012;
 
 use strict;
 use warnings;
@@ -38,30 +60,13 @@ use warnings;
 
 # Modules specific to this application.
 
-use Logger qw(:log_levels :common_routines);
+use Log::Application qw(:log_levels :common_routines);
 
 # ***** GLOBAL DATA DECLARATIONS *****
 
-# Constants used in settings syntax tree for common elements.
+# Constants for assorted messages.
 
-use constant SYNTAX_ANY       => 'r:.+';
-use constant SYNTAX_BOOLEAN   => 'r:^(?i:true|yes|on|1|false|no|off|0|(?!.))$';
-use constant SYNTAX_CIDR4     => 'r:^\d+(?:\.\d+){3}(?:/\d+)?$';
-use constant SYNTAX_DURATION  => 'r:^(?i:\d+[smhdw])$';
-use constant SYNTAX_FLOAT     => 'r:^\d+(?:\.\d+)?$';
-use constant SYNTAX_HOSTNAME  => 'r:^[-_[:alnum:]]+(?:\.[-_[:alnum:]]+)*$';
-use constant SYNTAX_INTEGER   => 'r:^[-+]?\d+$';
-use constant SYNTAX_IP4_ADDR  => 'r:^\d+(?:\.\d+){3}$';
-use constant SYNTAX_MACHINE   => 'r:^(?:(?:[-_[:alnum:]]+(?:\.[-_[:alnum:]]+)*)'
-                                     . '|(?:\d+(?:\.\d+){3}))$';
-use constant SYNTAX_NAME      => 'r:^[-_.\'"()\[\] [:alnum:]]+$';
-use constant SYNTAX_NATURAL   => 'r:^\d+$';
-use constant SYNTAX_PATH      => 'r:^[[:alnum:][:punct:] ]+$';
-use constant SYNTAX_PLUGIN    => 'r:^[-_.[:alnum:]]+$';
-use constant SYNTAX_PRINTABLE => 'r:^[[:print:]]+$';
-use constant SYNTAX_STRING    => 'r:^[-_. [:alnum:]]+$';
-use constant SYNTAX_USER_NAME => 'r:^[-_ [:alnum:]]+$';
-use constant SYNTAX_VARIABLE  => 'r:^[[:alnum:]_]+$';
+use constant SCHEMA_ERROR => 'Illegal syntax element found in syntax tree ';
 
 # Whether debug messages should be logged or not.
 
@@ -69,19 +74,38 @@ my $debug = 0;
 
 # A lookup hash for converting assorted durations into seconds.
 
-my %duration_in_seconds = ("s" => 1,
-                           "m" => 60,
-                           "h" => 3600,
-                           "d" => 86400,
-                           "w" => 604800);
+my %duration_in_seconds = ('s' => 1,
+                           'm' => 60,
+                           'h' => 3600,
+                           'd' => 86400,
+                           'w' => 604800);
+
+# A lookup hash for common syntactic elements.
+
+my %syntax_res = ('anything'  => qr/^.+$/,
+                  'boolean'   => qr/^(?i:true|yes|on|1|false|no|off|0|(?!.))$/,
+                  'cidr4'     => qr/^\d+(?:\.\d+){3}(?:\/\d+)?$/,
+                  'duration'  => qr/^(?i:\d+[smhdw])$/,
+                  'float'     => qr/^\d+(?:\.\d+)?$/,
+                  'hostname'  => qr/^[-_[:alnum:]]+(?:\.[-_[:alnum:]]+)*$/,
+                  'ip4_addr'  => qr/^\d+(?:\.\d+){3}$/,
+                  'machine'   => qr/^(?:(?:[-_[:alnum:]]+(?:\.[-_[:alnum:]]+)*)
+                                    |(?:\d+(?:\.\d+){3}))$/x,
+                  'name'      => qr/^[-_.\'"()\[\] [:alnum:]]+$/,
+                  'path'      => qr/^[[:alnum:][:punct:] ]+$/,
+                  'plugin'    => qr/^[-_.[:alnum:]]+$/,
+                  'printable' => qr/^[[:print:]]+$/,
+                  'string'    => qr/^[-_. [:alnum:]]+$/,
+                  'user_name' => qr/^[-_ [:alnum:]]+$/,
+                  'variable'  => qr/^[[:alnum:]_]+$/);
 
 # ***** FUNCTIONAL PROTOTYPES *****
 
 # Public routines.
 
-sub check_syntax($$$$);
 sub duration_to_seconds($);
-sub match_syntax_value($$);
+sub match_syntax_value($$;$);
+sub verify($$$$);
 
 # Public setters and getters.
 
@@ -91,40 +115,27 @@ sub debug(;$)
     return $debug;
 }
 
+# Private routines.
+
+sub verify_arrays($$$$);
+sub verify_hashes($$$$);
+
 # ***** PACKAGE INFORMATION *****
 
 # We are just a procedural module that exports stuff.
 
 use base qw(Exporter);
 
-our %EXPORT_TAGS = (syntax_elements => [qw(SYNTAX_ANY
-                                           SYNTAX_BOOLEAN
-                                           SYNTAX_CIDR4
-                                           SYNTAX_DURATION
-                                           SYNTAX_FLOAT
-                                           SYNTAX_HOSTNAME
-                                           SYNTAX_INTEGER
-                                           SYNTAX_IP4_ADDR
-                                           SYNTAX_MACHINE
-                                           SYNTAX_NAME
-                                           SYNTAX_NATURAL
-                                           SYNTAX_PATH
-                                           SYNTAX_PLUGIN
-                                           SYNTAX_PRINTABLE
-                                           SYNTAX_STRING
-                                           SYNTAX_USER_NAME
-                                           SYNTAX_VARIABLE)],
-                    common_routines => [qw(check_syntax
-                                           duration_to_seconds
-                                           match_syntax_value)]);
-our @EXPORT = qw();
+our %EXPORT_TAGS = (common_routines => [qw(duration_to_seconds
+                                           match_syntax_value
+                                           verify)]);
 our @EXPORT_OK = qw(debug);
-Exporter::export_ok_tags(qw(syntax_elements common_routines));
-our $VERSION = "1.0";
+Exporter::export_ok_tags(qw(common_routines));
+our $VERSION = '1.0';
 #
 ##############################################################################
 #
-#   Routine      - check_syntax
+#   Routine      - verify
 #
 #   Description  - Checks the specified structure making sure that the domain
 #                  specific syntax is ok.
@@ -146,321 +157,432 @@ our $VERSION = "1.0";
 
 
 
-sub check_syntax($$$$)
+sub verify($$$$)
 {
 
     my ($data, $syntax, $path, $status) = @_;
 
-    my $logger_context = Logger::Context->new("Syntax");
+    my $logger_context = Log::Application::Context->new(__PACKAGE__);
 
     # Check arrays, these are not only lists but also branch points.
 
-    if (ref($data) eq "ARRAY" and ref($syntax) eq "ARRAY")
+    if (ref($data) eq 'ARRAY' and ref($syntax) eq 'ARRAY')
+    {
+        verify_arrays($data, $syntax, $path, $status);
+    }
+
+    # Check records.
+
+    elsif (ref($data) eq 'HASH' and ref($syntax) eq 'HASH')
+    {
+        verify_hashes($data, $syntax, $path, $status);
+    }
+
+    # We should never see any other types as scalars are dealt with on the spot.
+
+    else
+    {
+        throw('Settings syntax parser, internal state error detected.');
+    }
+
+    return;
+
+}
+#
+##############################################################################
+#
+#   Routine      - verify_arrays
+#
+#   Description  - Checks the specified structure making sure that the domain
+#                  specific syntax is ok.
+#
+#   Data         - $data   : A reference to the array data item within the
+#                            record that is to be checked.
+#                  $syntax : A reference to that part of the syntax tree that
+#                            is going to be used to check the data referenced
+#                            by $data.
+#                  $path   : A string containing the current path through the
+#                            record for the current item in $data.
+#                  $status : A reference to a string that is to contain a
+#                            description of what is wrong. If everything is ok
+#                            then this string will be empty.
+#
+##############################################################################
+
+
+
+sub verify_arrays($$$$)
+{
+
+    my ($data, $syntax, $path, $status) = @_;
+
+    # Scan through the array looking for a match based upon scalar values and
+    # container types.
+
+    array_element: foreach my $i (0 .. $#$data)
     {
 
-        # Scan through the array looking for a match based upon scalar values
-        # and container types.
+        # We are comparing scalar values.
 
-        array_element: foreach my $i (0 .. $#$data)
+        if (ref($data->[$i]) eq '')
+        {
+            my $err = '';
+            foreach my $syn_el (@$syntax)
+            {
+                if (ref($syn_el) eq '')
+                {
+                    logger(DEBUG, "Comparing `%s->[%u]:%s' against `%s'.",
+                           $path,
+                           $i,
+                           $data->[$i],
+                           $syn_el)
+                        if ($debug);
+                    next array_element
+                        if (match_syntax_value($syn_el, $data->[$i], \$err));
+                }
+            }
+            $$status .= sprintf("Unexpected %s found at %s->[%u]. It either "
+                                    . "doesn't match the expected value "
+                                    . "format%s, or a list or record was "
+                                    . "expected instead.\n",
+                                defined($data->[$i])
+                                    ? "value `" . $data->[$i] . "'"
+                                    : "undefined value",
+                                $path,
+                                $i,
+                                ($err ne '') ? "($err)" : '');
+        }
+
+        # We are comparing arrays.
+
+        elsif (ref($data->[$i]) eq 'ARRAY')
         {
 
-            # We are comparing scalar values.
+            my $local_status = '';
 
-            if (ref($data->[$i]) eq "")
+            # As we are going off piste into the unknown (arrays don't really
+            # give us much clue as to what we are looking at nor where
+            # decisively to go), we may need to backtrack, so use a local status
+            # string and then only report anything wrong if we don't find a
+            # match at all.
+
+            foreach my $j (0 .. $#$syntax)
             {
-                foreach my $syn_el (@$syntax)
+                if (ref($syntax->[$j]) eq 'ARRAY')
                 {
-                    if (ref($syn_el) eq "")
-                    {
-                        logger(DEBUG, "Comparing `%s->[%u]:%s' against `%s'.",
-                               $path,
-                               $i,
-                               $data->[$i],
-                               $syn_el)
-                            if ($debug);
-                        next array_element
-                            if (match_syntax_value($syn_el, $data->[$i]));
-                    }
+                    logger(DEBUG,
+                           "Comparing `%s->[%u]:(ARRAY)' against `(ARRAY)'.",
+                           $path,
+                           $i)
+                        if ($debug);
+                    $local_status = '';
+                    verify($data->[$i],
+                           $syntax->[$j],
+                           $path . '->[' . $i . ']',
+                           \$local_status);
+                    next array_element if ($local_status eq '');
                 }
-                $$status .= sprintf("Unexpected %s found at %s->[%u]. It "
-                                        . "either doesn't match the expected "
-                                        . "value format, or a list or record "
-                                        . "was expected instead.\n",
-                                    defined($data->[$i])
-                                        ? "value `" . $data->[$i] . "'"
-                                        : "undefined value",
+            }
+
+            # Only report an error once for each route taken through the syntax
+            # tree.
+
+            if ($local_status eq '')
+            {
+                $$status .= sprintf('Unexpected list found at %s->[%u]. ',
                                     $path,
                                     $i);
             }
-
-            # We are comparing arrays.
-
-            elsif (ref($data->[$i]) eq "ARRAY")
+            else
             {
-
-                my $hash_in_syntax_tree;
-                my $local_status = "";
-
-                # As we are going off piste into the unknown (arrays don't
-                # really give us much clue as to what we are looking at nor
-                # where decisively to go), we may need to backtrack, so use a
-                # local status string and then only report anything wrong if we
-                # don't find a match at all.
-
-                foreach my $j (0 .. $#$syntax)
-                {
-                    if (ref($syntax->[$j]) eq "ARRAY")
-                    {
-                        logger(DEBUG,
-                               "Comparing `%s->[%u]:(ARRAY)' against "
-                                   . "`(ARRAY)'.",
-                               $path,
-                               $i)
-                            if ($debug);
-                        $local_status = "";
-                        check_syntax($data->[$i],
-                                     $syntax->[$j],
-                                     $path . "->[" . $i . "]",
-                                     \$local_status);
-                        next array_element if ($local_status eq "");
-                    }
-                    elsif (ref($syntax->[$j]) eq "HASH")
-                    {
-                        $hash_in_syntax_tree = 1;
-                    }
-                }
-
-                # Only report an error once for each route taken through the
-                # syntax tree.
-
-                if ($local_status eq "")
-                {
-                    $$status .= sprintf("Unexpected list found at %s->[%u]. ",
-                                        $path,
-                                        $i);
-                    if ($hash_in_syntax_tree)
-                    {
-                        $$status .=
-                            "Either a value or record was expected instead.\n";
-                    }
-                    else
-                    {
-                        $$status .= "A simple value was expected instead.\n";
-                    }
-                }
-
                 $$status .= $local_status;
-
             }
 
-            # We are comparing hashes, records, so look to see if there is a
-            # common field in one of the hashes. If so then take that branch.
+        }
 
-            elsif (ref($data->[$i]) eq "HASH")
+        # We are comparing hashes, records, so look to see if there is a common
+        # field in one of the hashes. If so then take that branch.
+
+        elsif (ref($data->[$i]) eq 'HASH')
+        {
+
+            # We may need to backtrack, so use a local status string and then
+            # only report anything wrong if we don't find a match at all.
+
+            # First look for a special matching type field and value. This will
+            # give an exact match if set up correctly.
+
+            foreach my $type_key (keys(%{$data->[$i]}))
             {
-
-                my $a_field = (keys(%{$data->[$i]}))[0];
-
+                my $syn_key = 't:' . $type_key;
+                my $type_value = $data->[$i]->{$type_key};
                 foreach my $syn_el (@$syntax)
                 {
-                    if (ref($syn_el) eq "HASH")
+                    if (ref($syn_el) eq 'HASH'
+                        and exists($syn_el->{'t:' . $type_key})
+                        and match_syntax_value($syn_el->{'t:' . $type_key},
+                                               $type_value))
                     {
-
-                        logger(DEBUG, "Comparing `%s->[%u]:%s' against `%s'.",
+                        logger(DEBUG,
+                               "Comparing `%s->[%u]:%s' against `%s' based on "
+                                   . "type field `%s'.",
                                $path,
                                $i,
-                               join("|", keys(%{$data->[$i]})),
-                               join("|", keys(%$syn_el)))
+                               join('|', keys(%{$data->[$i]})),
+                               join('|', keys(%$syn_el)),
+                               $type_key)
                             if ($debug);
+                        verify($data->[$i],
+                               $syn_el,
+                               $path . '->[' . $i . ']',
+                               $status);
+                        next array_element;
+                    }
+                }
+            }
 
-                        # First check for records with custom fields in them and
-                        # simple direct key name matches.
+            # Ok that didn't work so check to see if there is only one field in
+            # the hash (typically a record type field). If no single key hashes
+            # exist then abort, the schema has to change.
 
-                        if (grep(/^c\:$/, keys(%$syn_el))
-                            or exists($syn_el->{"m:" . $a_field})
-                            or exists($syn_el->{"s:" . $a_field}))
+            if (keys(%{$data->[$i]}) != 1)
+            {
+                $$status .= sprintf("Untyped multifield records are not "
+                                        . "allowed at %s->[%u].\n",
+                                    $path,
+                                    $i);
+            }
+            else
+            {
+
+                my $data_field = (keys(%{$data->[$i]}))[0];
+                my $local_status = '';
+                foreach my $syn_el (@$syntax)
+                {
+                    if (ref($syn_el) eq 'HASH')
+                    {
+
+                        # Don't allow non-typed records.
+
+                        throw('%s(untyped records are not allowed)',
+                              SCHEMA_ERROR)
+                            unless (keys(%$syn_el) == 1);
+
+                        # Only allow plain strings as field names.
+
+                        my $syn_field = (keys(%$syn_el))[0];
+                        throw("%s(record typefields must be of type `m:', `s:' "
+                                  . "or `t:')",
+                              SCHEMA_ERROR)
+                            unless ($syn_field =~ m/^[mst]:/);
+
+                        if (match_syntax_value($syn_field, $data_field))
                         {
-                            check_syntax($data->[$i],
-                                         $syn_el,
-                                         $path . "->[" . $i . "]",
-                                         $status);
-                            next array_element;
-                        }
-
-                        # No luck so far so now try regex a `lookup'.
-
-                        else
-                        {
-                            foreach my $key (keys(%$syn_el))
+                            logger(DEBUG,
+                                   "Comparing `%s->[%u]:%s' against `%s'.",
+                                   $path,
+                                   $i,
+                                   join('|', keys(%{$data->[$i]})),
+                                   join('|', keys(%$syn_el)))
+                                if ($debug);
+                            $local_status = '';
+                            verify($data->[$i],
+                                   $syn_el,
+                                   $path . '->[' . $i . ']',
+                                   \$local_status);
+                            if ($local_status eq '')
                             {
-                                if (match_syntax_value($key, $a_field))
-                                {
-                                    check_syntax($data->[$i],
-                                                 $syn_el,
-                                                 $path . "->[" . $i . "]",
-                                                 $status);
-                                    next array_element;
-                                }
+                                next array_element;
+                            }
+                            else
+                            {
+                                last;
                             }
                         }
 
                     }
                 }
 
-                # If we have got here then we can't find a match for the current
-                # data item in all the record entries.
+                # Only report an error once for each route taken through the
+                # syntax tree.
 
-                $$status .=
-                    sprintf("Unexpected record `%s' found at %s->[%u].\n",
-                            $a_field,
-                            $path,
-                            $i);
+                if ($local_status eq '')
+                {
+                    $$status .= sprintf("Unexpected typed record with field "
+                                            . "`%s' found at %s->[%u].\n",
+                                        $data_field,
+                                        $path,
+                                        $i);
+                }
+                else
+                {
+                    $$status .= $local_status;
+                }
 
             }
 
         }
 
-        # Unlikely but just check for empty arrays.
-
-        if (@$data == 0)
-        {
-            $$status .= sprintf("Empty array found at %s. These are not "
-                                    . "allowed.\n",
-                                $path);
-        }
-
     }
 
-    # Check records.
+    # Unlikely but just check for empty arrays.
 
-    elsif (ref($data) eq "HASH" and ref($syntax) eq "HASH")
+    if (@$data == 0)
+    {
+        $$status .= sprintf("Empty array found at %s. These are not allowed.\n",
+                            $path);
+    }
+
+    return;
+
+}
+#
+##############################################################################
+#
+#   Routine      - verify_hashes
+#
+#   Description  - Checks the specified structure making sure that the domain
+#                  specific syntax is ok.
+#
+#   Data         - $data   : A reference to the hash data item within the
+#                            record that is to be checked.
+#                  $syntax : A reference to that part of the syntax tree that
+#                            is going to be used to check the data referenced
+#                            by $data.
+#                  $path   : A string containing the current path through the
+#                            record for the current item in $data.
+#                  $status : A reference to a string that is to contain a
+#                            description of what is wrong. If everything is ok
+#                            then this string will be empty.
+#
+##############################################################################
+
+
+
+sub verify_hashes($$$$)
+{
+
+    my ($data, $syntax, $path, $status) = @_;
+
+    my $custom_fields = grep(/^c\:$/, keys(%$syntax));
+    my (@mandatory_fields);
+
+    # Check that all mandatory fields are present.
+
+    foreach my $key (keys(%$syntax))
+    {
+        if ($key =~ m/^m\:(.+)$/)
+        {
+            push(@mandatory_fields, $1);
+        }
+    }
+    foreach my $mandatory_field (@mandatory_fields)
+    {
+        if (not exists($data->{$mandatory_field}))
+        {
+            $$status .= sprintf("The %s record does not contain the mandatory "
+                                    . "field `%s'.\n",
+                                $path,
+                                $mandatory_field);
+        }
+    }
+
+    # Check each field.
+
+    hash_key: foreach my $field (keys(%$data))
     {
 
-        my $custom_fields = grep(/^c\:$/, keys(%$syntax));
-        my (@mandatory_fields);
+        my $syn_el;
 
-        # Check that all mandatory fields are present.
+        # Locate the matching field in the syntax tree.
 
-        foreach my $key (keys(%$syntax))
+        if (exists($syntax->{'m:' . $field}))
         {
-            if ($key =~ m/^m\:(.+)$/)
-            {
-                push(@mandatory_fields, $1);
-            }
+            $syn_el = $syntax->{'m:' . $field};
         }
-        foreach my $mandatory_field (@mandatory_fields)
+        elsif (exists($syntax->{'s:' . $field}))
         {
-            if (not exists($data->{$mandatory_field}))
-            {
-                $$status .= sprintf("The %s record does not contain the "
-                                        . "mandatory field `%s'.\n",
-                                    $path,
-                                    $mandatory_field);
-            }
+            $syn_el = $syntax->{'s:' . $field};
         }
-
-        # Check each field.
-
-        hash_key: foreach my $field (keys(%$data))
+        else
         {
-
-            my $syn_el;
-
-            # Locate the matching field in the syntax tree.
-
-            if (exists($syntax->{"m:" . $field}))
+            foreach my $key (keys(%$syntax))
             {
-                $syn_el = $syntax->{"m:" . $field};
-            }
-            elsif (exists($syntax->{"s:" . $field}))
-            {
-                $syn_el = $syntax->{"s:" . $field};
-            }
-            else
-            {
-                foreach my $key (keys(%$syntax))
+                if (match_syntax_value($key, $field))
                 {
-                    if (match_syntax_value($key, $field))
-                    {
-                        $syn_el = $syntax->{$key};
-                        last;
-                    }
+                    $syn_el = $syntax->{$key};
+                    last;
                 }
             }
+        }
 
-            # Deal with unknown fields, which are ok if we have custom fields in
-            # the record.
+        # Deal with unknown fields, which are ok if we have custom fields in the
+        # record.
 
-            if (not defined($syn_el))
-            {
-                $$status .= sprintf("The %s record contains an invalid field "
-                                        . "`%s'.\n",
-                                    $path,
-                                    $field)
-                    unless (grep(/^c\:$/, keys(%$syntax)));
-                next hash_key;
-            }
+        if (not defined($syn_el))
+        {
+            $$status .= sprintf("The %s record contains an invalid field "
+                                    . "`%s'.\n",
+                                $path,
+                                $field)
+                unless (grep(/^c\:$/, keys(%$syntax)));
+            next hash_key;
+        }
 
-            logger(DEBUG, "Comparing `%s->%s:%s' against `%s'.",
-                   $path,
-                   $field,
-                   (ref($data->{$field}) eq "")
-                       ? $data->{$field} : "(" . ref($data->{$field}) . ")",
-                   (ref($syn_el) eq "") ? $syn_el : "(" . ref($syn_el) . ")")
-                if ($debug);
+        logger(DEBUG, "Comparing `%s->%s:%s' against `%s'.",
+               $path,
+               $field,
+               (ref($data->{$field}) eq '')
+                   ? $data->{$field} : '(' . ref($data->{$field}) . ')',
+               (ref($syn_el) eq '') ? $syn_el : '(' . ref($syn_el) . ')')
+            if ($debug);
 
-            # Ok now check that the value is correct and process it.
+        # Ok now check that the value is correct and process it.
 
-            if (ref($syn_el) eq "" and ref($data->{$field}) eq "")
+        if (ref($syn_el) eq '' and ref($data->{$field}) eq '')
+        {
+            my $err = '';
+            if (not match_syntax_value($syn_el, $data->{$field}, \$err))
             {
-                if (not match_syntax_value($syn_el, $data->{$field}))
-                {
-                    $$status .= sprintf("Unexpected %s found at %s. It doesn't "
-                                            . "match the expected value "
-                                            . "format.\n",
-                                        defined($data->{$field})
-                                            ? "value `" . $data->{$field} . "'"
-                                            : "undefined value",
-                                        $path . "->" . $field)
-                }
+                $$status .= sprintf("Unexpected %s found at %s. It doesn't "
+                                        . "match the expected value "
+                                        . "format%s.\n",
+                                    defined($data->{$field})
+                                        ? "value `" . $data->{$field} . "'"
+                                        : "undefined value",
+                                    $path . '->' . $field,
+                                    ($err ne '') ? "($err)" : '');
             }
-            elsif ((ref($syn_el) eq "ARRAY" and ref($data->{$field}) eq "ARRAY")
-                   or (ref($syn_el) eq "HASH"
-                       and ref($data->{$field}) eq "HASH"))
-            {
-                check_syntax($data->{$field},
-                             $syn_el,
-                             $path . "->" . $field,
-                             $status);
-            }
-            elsif (ref($syn_el) eq "")
-            {
-                $$status .= sprintf("The %s field does not contain a simple "
-                                        . "value.\n",
-                                    $path . "->" . $field);
-            }
-            elsif (ref($syn_el) eq "ARRAY")
-            {
-                $$status .= sprintf("The %s field is not an array.\n",
-                                    $path . "->" . $field);
-            }
-            elsif (ref($syn_el) eq "HASH")
-            {
-                $$status .= sprintf("The %s field is not a record.\n",
-                                    $path . "->" . $field);
-            }
-
+        }
+        elsif ((ref($syn_el) eq 'ARRAY' and ref($data->{$field}) eq 'ARRAY')
+               or (ref($syn_el) eq 'HASH'
+                   and ref($data->{$field}) eq 'HASH'))
+        {
+            verify($data->{$field},
+                   $syn_el,
+                   $path . '->' . $field,
+                   $status);
+        }
+        elsif (ref($syn_el) eq '')
+        {
+            $$status .= sprintf("The %s field does not contain a simple "
+                                    . "value.\n",
+                                $path . '->' . $field);
+        }
+        elsif (ref($syn_el) eq 'ARRAY')
+        {
+            $$status .= sprintf("The %s field is not an array.\n",
+                                $path . '->' . $field);
+        }
+        elsif (ref($syn_el) eq 'HASH')
+        {
+            $$status .= sprintf("The %s field is not a record.\n",
+                                $path . '->' . $field);
         }
 
     }
 
-    # We whould should never see any other types as scalars are dealt with on
-    # the spot.
-
-    else
-    {
-        throw("Settings syntax parser, internal state error detected.");
-    }
+    return;
 
 }
 #
@@ -474,57 +596,157 @@ sub check_syntax($$$$)
 #                                 value is to be compared against.
 #                  $value       : The string that is to be compared against
 #                                 the syntax element.
+#                  $error_text  : A reference to the string that is to contain
+#                                 expected type or range mismatch information.
+#                                 This is optional.
 #                  Return Value : True for a match, otherwise false.
 #
 ##############################################################################
 
 
 
-sub match_syntax_value($$)
+sub match_syntax_value($$;$)
 {
 
-    my ($syntax, $value) = @_;
+    my ($syntax, $value, $error_text) = @_;
 
     # We don't allow undefined values.
 
     return unless(defined($value));
 
-    my ($pattern,
+    my ($arg,
         $result,
         $type);
-    my $logger_context = Logger::Context->new("Syntax");
+    my $logger_context = Log::Application::Context->new('Syntax');
 
     # Decide what to do based upon the header.
 
-    if ($syntax =~ m/^([cmrs]):(.*)/)
+    if ($syntax =~ m/^([cfimRrstw]):(.*)/)
     {
         $type = $1;
-        $pattern = $2;
+        $arg = $2;
     }
     else
     {
-        throw("Illegal syntax element found in syntax tree (syntax = `%s', "
-                  . "value = `%s'.",
+        throw("%s(syntax = `%s', value = `%s').",
+              SCHEMA_ERROR,
               $syntax,
               $value);
     }
-    if ($type eq "c")
+    if ($type eq 'c')
     {
         $result = 1;
     }
-    elsif ($type eq "r")
+    elsif ($type eq 'f')
     {
-        $result = 1 if ($value =~ m/$pattern/);
+        my $float_re = '[-+]?(?=\d|\.\d)\d*(?:\.\d*)?(?:[Ee][-+]?\d+)?';
+        if ($arg =~ m/^(?:($float_re))?(?:,($float_re))?$/)
+        {
+            my ($min, $max) = ($1, $2);
+            throw("%s(syntax = `%s', minimum is greater than maximum).",
+                  SCHEMA_ERROR,
+                  $syntax)
+                if (defined($min) and defined($max) and $min  > $max);
+            if ($value =~ m/^$float_re$/
+                and (not defined($min) or $value >= $min)
+                and (not defined($max) or $value <= $max))
+            {
+                $result = 1;
+            }
+            elsif (defined($error_text))
+            {
+                $$error_text =
+                    sprintf('float between %s and %s',
+                            defined($min) ? $min : '<No Lower Limit>',
+                            defined($max) ? $max : '<No Upper Limit>');
+            }
+        }
+        else
+        {
+            throw("%s(syntax = `%s', value = `%s').",
+                  SCHEMA_ERROR,
+                  $syntax,
+                  $value);
+        }
+    }
+    elsif ($type =~ m/^[iw]$/)
+    {
+        my $re;
+        my $type_str;
+        if ($type eq 'i')
+        {
+            $re = '[-+]?\d+';
+            $type_str = 'integer';
+        }
+        else
+        {
+            $re = '\d+';
+            $type_str = 'whole';
+        }
+        if ($arg =~ m/^(?:($re))?(?:,($re))?(?:,($re))?$/)
+        {
+            my ($min, $max, $step) = ($1, $2, $3);
+            throw("%s(syntax = `%s', minimum is greater than maximum).",
+                  SCHEMA_ERROR,
+                  $syntax)
+                if (defined($min) and defined($max) and $min  > $max);
+            throw("%s(syntax = `%s', minimum/maximum values are not "
+                      . "compatible with step value).",
+                  SCHEMA_ERROR,
+                  $syntax)
+                if (defined($step)
+                    and ((defined($min) and ($min % $step) != 0)
+                         or (defined($max) and ($max % $step) != 0)));
+            if ($value =~ m/^$re$/
+                and (not defined($min) or $value >= $min)
+                and (not defined($max) or $value <= $max)
+                and (not defined($step) or ($value % $step) == 0))
+            {
+                $result = 1;
+            }
+            elsif (defined($error_text))
+            {
+                $$error_text =
+                    sprintf('integer between %s and %s%s',
+                            defined($min) ? $min : '<No Lower Limit>',
+                            defined($max) ? $max : '<No Upper Limit>',
+                            defined($step) ? " with a step size of $max" : '');
+            }
+        }
+        else
+        {
+            throw("%s(syntax = `%s', value = `%s').",
+                  SCHEMA_ERROR,
+                  $syntax,
+                  $value);
+        }
+    }
+    elsif ($type eq 'R')
+    {
+        if (exists($syntax_res{$arg}))
+        {
+            $result = 1 if ($value =~ m/$syntax_res{$arg}/);
+        }
+        else
+        {
+            throw("%s(syntax = `%s', unknown syntactic regular expression).",
+                  SCHEMA_ERROR,
+                  $syntax);
+        }
+    }
+    elsif ($type eq 'r')
+    {
+        $result = 1 if ($value =~ m/$arg/);
     }
     else
     {
-        $result = 1 if ($pattern eq $value);
+        $result = 1 if ($arg eq $value);
     }
 
     logger(DEBUG, "Comparing `%s' against `%s'. Match: %s.",
            $syntax,
            $value,
-           ($result) ? "Yes" : "No")
+           ($result) ? 'Yes' : 'No')
         if ($debug);
 
     return $result;
@@ -550,7 +772,7 @@ sub duration_to_seconds($)
 
     my $duration = $_[0];
 
-    my $logger_context = Logger::Context->new("Syntax");
+    my $logger_context = Log::Application::Context->new('Syntax');
     my $seconds = 0;
 
     if (lc($duration) =~ m/^(\d+)([smhdw])$/)
@@ -583,7 +805,7 @@ __END__
 
 =head1 NAME
 
-Data::SyntaxChecker - Check the syntax of Perl data structures
+Config::Verifier - Verify the structure and values inside Perl data structures
 
 =head1 VERSION
 
@@ -591,7 +813,7 @@ Data::SyntaxChecker - Check the syntax of Perl data structures
 
 =head1 SYNOPSIS
 
-  use Data::SyntaxChecker qw(:syntax_elements :common_routines);
+  use Config::Verifier qw(:syntax_elements :common_routines);
   my %settings_syntax_tree =
       ('m:config_version' => SYNTAX_FLOAT,
        's:service'        =>
@@ -616,13 +838,13 @@ Data::SyntaxChecker - Check the syntax of Perl data structures
             's:use_syslog'              => SYNTAX_BOOLEAN});
   my $data = YAML::XS::LoadFile("my-config.yml");
   my $status = "";
-  check_syntax($data, \%settings_syntax_tree, "settings", \$status);
+  verify($data, \%settings_syntax_tree, "settings", \$status);
   die("Syntax error detected. The reason given was:\n" . $status)
       if ($status ne "");
 
 =head1 DESCRIPTION
 
-The Data::SyntaxChecker module checks the given Perl data structure against the
+The Config::Verifier module checks the given Perl data structure against the
 specific syntax tree. This is particularly useful for when you parse and read in
 configuration data from say a YAML file where YAML does not provide any
 additional domain specific schema style validation of the data.
@@ -631,7 +853,7 @@ additional domain specific schema style validation of the data.
 
 =over 4
 
-=item B<check_syntax(\%data, \%syntax, $path, \$status)>
+=item B<verify(\%data, \%syntax, $path, \$status)>
 
 Checks the specified structure making sure that the domain specific syntax is
 ok.
@@ -661,18 +883,18 @@ form as described by SYNTAX_DURATION and is a number followed by a time unit
 that can be one of s, m, h, d, or w for seconds, minutes, hours, days and weeks
 respectively.
 
-=item B<match_syntax_value($yntax, $value)>
+=item B<match_syntax_value($yntax, $value[, $error])>
 
-Tests the data in $value against an item in the syntax tree as given by $syntax.
+Tests the data in $value against an item in the syntax tree as given by $syntax. $error is a reference to a string that is to contain any type/value errors that are detected.
 
 =back
 
 =head1 RETURN VALUES
 
-check_syntax() returns nothing. debug() returns the previous debug message
-setting as a boolean. duration_to_seconds() returns the number of seconds that
-the specified duration represents. Lastly match_syntax_value() returns true for
-a match, otherwise false for no match.
+verify() returns nothing. debug() returns the previous debug message setting as
+a boolean. duration_to_seconds() returns the number of seconds that the
+specified duration represents. Lastly match_syntax_value() returns true for a
+match, otherwise false for no match.
 
 =head1 NOTES
 
@@ -708,7 +930,7 @@ elements are imported into the calling name space:
 When this import tag is used the following routines are imported into the
 calling name space:
 
-    check_syntax
+    verify
     duration_to_seconds
     match_syntax_value
 
@@ -740,6 +962,10 @@ regular expressions for the more common syntax elements.
 
 Please see the example under SYNOPSIS.
 
+=head1 SEE ALSO
+
+https://metacpan.org/pod/Config::Validator
+
 =head1 BUGS
 
 This module is certainly not exhaustive and doesn't contain support for parsing
@@ -747,4 +973,28 @@ MS-DOS style file paths, although that would be trivial to do. Also not
 everything can be checked. Maybe a future enhancement could be to have a code
 reference mechanism whereby code snippets could be included in the syntax tree.
 
+=head1 AUTHORS
+
+Anthony Cooper. Currently maintained by Anthony Cooper. Please report all faults
+and suggestions to <aecooper@cpan.org>.
+
+=head1 COPYRIGHT
+
+Copyright (C) 2024 by Anthony Cooper <aecooper@cpan.org>.
+
+This library is free software; you can redistribute it and/or modify it under
+the terms of the GNU Lesser General Public License as published by the Free
+Software Foundation; either version 3 of the License, or (at your option) any
+later version.
+
+This library is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this library; if not, write to the Free Software Foundation, Inc., 59
+Temple Place - Suite 330, Boston, MA 02111-1307 USA.
+
 =cut
+
+1;
