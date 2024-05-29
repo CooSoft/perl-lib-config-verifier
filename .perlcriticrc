@@ -1,12 +1,16 @@
 severity = 1
 exclude = .*Prototypes .*EmptyReturn
+verbose = %f:%l:\n    %m\n    [%p]\n
+
+[ValuesAndExpressions::ProhibitInterpolationOfLiterals]
+allow_if_string_contains_single_quote = 1
+
 [-BuiltinFunctions::RequireBlockGrep]
 [-CodeLayout::ProhibitParensWithBuiltins]
 [-CodeLayout::RequireTrailingCommas]
 [-ControlStructures::ProhibitCascadingIfElse]
 [-ControlStructures::ProhibitDeepNests]
 [-ControlStructures::ProhibitPostfixControls]
-[-Modules::RequireEndWithOne]
 [-NamingConventions::Capitalization]
 [-References::ProhibitDoubleSigils]
 [-RegularExpressions::ProhibitEscapedMetacharacters]
@@ -18,6 +22,6 @@ exclude = .*Prototypes .*EmptyReturn
 [-ValuesAndExpressions::ProhibitComplexVersion]
 [-ValuesAndExpressions::ProhibitConstantPragma]
 [-ValuesAndExpressions::ProhibitEmptyQuotes]
-[-ValuesAndExpressions::ProhibitInterpolationOfLiterals]
+[-ValuesAndExpressions::ProhibitMagicNumbers]
 [-ValuesAndExpressions::ProhibitNoisyQuotes]
 [-ValuesAndExpressions::RequireNumberSeparators]
