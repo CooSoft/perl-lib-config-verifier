@@ -81,24 +81,22 @@ my %duration_in_seconds = ('s' => 1,
                            'd' => 86400,
                            'w' => 604800);
 
-# A lookup hash for common syntactic elements.
+# A lookup hash for common syntactic elements. Please note the (?!.) sequence at
+# the end matches nothing, i.e. '' and undef should go to false. The more
+# complex regexes are generated at load time.
 
-my %syntax_res = ('anything'  => qr/^.+$/,
-                  'boolean'   => qr/^(?i:true|yes|on|1|false|no|off|0|(?!.))$/,
-                  'cidr4'     => qr/^\d+(?:\.\d+){3}(?:\/\d+)?$/,
-                  'duration'  => qr/^(?i:\d+[smhdw])$/,
-                  'float'     => qr/^\d+(?:\.\d+)?$/,
-                  'hostname'  => qr/^[-_[:alnum:]]+(?:\.[-_[:alnum:]]+)*$/,
-                  'ip4_addr'  => qr/^\d+(?:\.\d+){3}$/,
-                  'machine'   => qr/^(?:(?:[-_[:alnum:]]+(?:\.[-_[:alnum:]]+)*)
-                                    |(?:\d+(?:\.\d+){3}))$/x,
-                  'name'      => qr/^[-_.\'"()\[\] [:alnum:]]+$/,
-                  'path'      => qr/^[[:alnum:][:punct:] ]+$/,
-                  'plugin'    => qr/^[-_.[:alnum:]]+$/,
-                  'printable' => qr/^[[:print:]]+$/,
-                  'string'    => qr/^[-_. [:alnum:]]+$/,
-                  'user_name' => qr/^[-_ [:alnum:]]+$/,
-                  'variable'  => qr/^[[:alnum:]_]+$/);
+my %syntax_regexes =
+    (anything  => qr/^.+$/,
+     boolean   => qr/^(?i:true|yes|on|1|false|no|off|0|(?!.))$/,
+     duration  => qr/^(?i:\d+(?:ms|[smhdw]))$/,
+     float     => qr/^\d+(?:\.\d+)?$/,
+     name      => qr/^[-_.\'"()\[\] [:alnum:]]+$/,
+     path      => qr/^[[:alnum:][:punct:] ]+$/,
+     plugin    => qr/^[-_.[:alnum:]]+$/,
+     printable => qr/^[[:print:]]+$/,
+     string    => qr/^[-_. [:alnum:]]+$/,
+     user_name => qr/^[-_ [:alnum:]]+$/,
+     variable  => qr/^[[:alnum:]_]+$/);
 
 # ***** FUNCTIONAL PROTOTYPES *****
 
@@ -111,10 +109,12 @@ sub debug(;$)
 }
 sub duration_to_seconds($);
 sub match_syntax_value($$;$);
+sub register_syntax_regex($$);
 sub verify($$$$);
 
 # Private routines.
 
+sub generate_regexes();
 sub logger(@)
 {
     STDERR->printf(@_);
@@ -136,6 +136,7 @@ use base qw(Exporter);
 
 our %EXPORT_TAGS = (common_routines => [qw(duration_to_seconds
                                            match_syntax_value
+                                           register_syntax_regex
                                            verify)]);
 our @EXPORT_OK = qw(debug);
 Exporter::export_ok_tags(qw(common_routines));
@@ -725,9 +726,9 @@ sub match_syntax_value($$;$)
     }
     elsif ($type eq 'R')
     {
-        if (exists($syntax_res{$arg}))
+        if (exists($syntax_regexes{$arg}))
         {
-            $result = 1 if ($value =~ m/$syntax_res{$arg}/);
+            $result = 1 if ($value =~ m/$syntax_regexes{$arg}/);
         }
         else
         {
@@ -789,7 +790,109 @@ sub duration_to_seconds($)
     return $seconds;
 
 }
+#
+##############################################################################
+#
+#   Routine      - register_syntax_regex
+#
+#   Description  - Register the specified syntax element and pattern.
+#
+#   Data         - $name        : The name that is to be given to the syntax
+#                                 element.
+#                  $regex       : The regex specified as a regular string.
+#
+##############################################################################
 
+
+
+sub register_syntax_regex($$)
+{
+
+    my ($name, $regex) = @_;
+
+    # The name must be a simple variable like name and the regex pattern must be
+    # properly anchored.
+
+    throw("`%s' is not a suitable syntax element name.", $name)
+        if ($name !~ m/^[-[:alnum:]_.]+$/);
+    throw("`%s' is not anchored to the start and end of the string.", $regex)
+        if ($regex !~ m/^\^.*\$$/);
+
+    # Register it.
+
+    $syntax_regexes{$name} = qr/$regex/;
+
+    return;
+
+}
+#
+##############################################################################
+#
+#   Routine      - generate_regexes
+#
+#   Description  - Generate the less simple regular expressions. This code is
+#                  very closely based on the _init_regexp() routine from
+#                  Lionel Cons's Config::Validator module.
+#
+#   Data         - None.
+#
+##############################################################################
+
+
+
+sub generate_regexes()
+{
+
+    # The parentheses below are meant to be non-capturing however with all the
+    # colons scattered around it's less confusing to use `(...)' rather than
+    # `(?:...)'. This is then patched up afterwards.
+
+    my $label = '[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?';
+    my $byte = '25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d';
+    my $hex4 = '[0-9a-fA-F]{1,4}';
+    my $ipv4 = "(($byte)\\.){3}($byte)";
+    my @tail = (':',
+                "(:($hex4)?|($ipv4))",
+                ":(($ipv4)|$hex4(:$hex4)?|)",
+                "(:($ipv4)|:$hex4(:($ipv4)|(:$hex4){0,2})|:)",
+                "((:$hex4){0,2}(:($ipv4)|(:$hex4){1,2})|:)",
+                "((:$hex4){0,3}(:($ipv4)|(:$hex4){1,2})|:)",
+                "((:$hex4){0,4}(:($ipv4)|(:$hex4){1,2})|:)");
+    my $ipv6 = $hex4;
+    foreach my $tail (@tail)
+    {
+        $ipv6 = "$hex4:($ipv6|$tail)";
+    }
+    $ipv6 = ":(:$hex4){0,5}((:$hex4){1,2}|:$ipv4)|$ipv6";
+    my $hostname = "($label\\.)*$label";
+
+    my %res = (cidrv4    => "$ipv4/\\d+",
+               cidrv6    => "$ipv6/\\d+",
+               hostname  => "($label\\.)*$label",
+               ipv4_addr => $ipv4,
+               ipv6_addr => $ipv6,
+               machine   => "($hostname)|($ipv4)|($ipv6)");
+
+    # Make non-capturing, compile and then store the regexes in the main syntax
+    # table.
+
+    foreach my $name (keys(%res))
+    {
+        $res{$name} =~ s/\(/(?:/g;
+        $syntax_regexes{$name} = qr/^(?:$res{$name})$/;
+    }
+
+    return;
+
+}
+#
+##############################################################################
+#
+#   On Load Initialisation Code
+#
+##############################################################################
+
+generate_regexes();
 1;
 
 __END__
