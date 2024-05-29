@@ -58,9 +58,10 @@ use warnings;
 
 # ***** REQUIRED PACKAGES *****
 
-# Modules specific to this application.
+# Standard Perl and CPAN modules.
 
-use Log::Application qw(:log_levels :common_routines);
+use Carp;
+use IO::Handle;
 
 # ***** GLOBAL DATA DECLARATIONS *****
 
@@ -103,20 +104,27 @@ my %syntax_res = ('anything'  => qr/^.+$/,
 
 # Public routines.
 
-sub duration_to_seconds($);
-sub match_syntax_value($$;$);
-sub verify($$$$);
-
-# Public setters and getters.
-
 sub debug(;$)
 {
     $debug = $_[0] if (defined($_[0]));
     return $debug;
 }
+sub duration_to_seconds($);
+sub match_syntax_value($$;$);
+sub verify($$$$);
 
 # Private routines.
 
+sub logger(@)
+{
+    STDERR->printf(@_);
+    STDERR->print("\n");
+    return;
+}
+sub throw(@)
+{
+    croak(sprintf(@_));
+}
 sub verify_arrays($$$$);
 sub verify_hashes($$$$);
 
@@ -161,8 +169,6 @@ sub verify($$$$)
 {
 
     my ($data, $syntax, $path, $status) = @_;
-
-    my $logger_context = Log::Application::Context->new(__PACKAGE__);
 
     # Check arrays, these are not only lists but also branch points.
 
@@ -231,7 +237,7 @@ sub verify_arrays($$$$)
             {
                 if (ref($syn_el) eq '')
                 {
-                    logger(DEBUG, "Comparing `%s->[%u]:%s' against `%s'.",
+                    logger("Comparing `%s->[%u]:%s' against `%s'.",
                            $path,
                            $i,
                            $data->[$i],
@@ -241,16 +247,16 @@ sub verify_arrays($$$$)
                         if (match_syntax_value($syn_el, $data->[$i], \$err));
                 }
             }
-            $$status .= sprintf("Unexpected %s found at %s->[%u]. It either "
+            $$status .= sprintf('Unexpected %s found at %s->[%u]. It either '
                                     . "doesn't match the expected value "
-                                    . "format%s, or a list or record was "
+                                    . 'format%s, or a list or record was '
                                     . "expected instead.\n",
                                 defined($data->[$i])
-                                    ? "value `" . $data->[$i] . "'"
-                                    : "undefined value",
+                                    ? 'value `' . $data->[$i] . "'"
+                                    : 'undefined value',
                                 $path,
                                 $i,
-                                ($err ne '') ? "($err)" : '');
+                                ($err ne '') ? " ($err)" : '');
         }
 
         # We are comparing arrays.
@@ -270,8 +276,7 @@ sub verify_arrays($$$$)
             {
                 if (ref($syntax->[$j]) eq 'ARRAY')
                 {
-                    logger(DEBUG,
-                           "Comparing `%s->[%u]:(ARRAY)' against `(ARRAY)'.",
+                    logger("Comparing `%s->[%u]:(ARRAY)' against `(ARRAY)'.",
                            $path,
                            $i)
                         if ($debug);
@@ -289,7 +294,7 @@ sub verify_arrays($$$$)
 
             if ($local_status eq '')
             {
-                $$status .= sprintf('Unexpected list found at %s->[%u]. ',
+                $$status .= sprintf("Unexpected list found at %s->[%u].\n",
                                     $path,
                                     $i);
             }
@@ -323,8 +328,7 @@ sub verify_arrays($$$$)
                         and match_syntax_value($syn_el->{'t:' . $type_key},
                                                $type_value))
                     {
-                        logger(DEBUG,
-                               "Comparing `%s->[%u]:%s' against `%s' based on "
+                        logger("Comparing `%s->[%u]:%s' against `%s' based on "
                                    . "type field `%s'.",
                                $path,
                                $i,
@@ -347,7 +351,7 @@ sub verify_arrays($$$$)
 
             if (keys(%{$data->[$i]}) != 1)
             {
-                $$status .= sprintf("Untyped multifield records are not "
+                $$status .= sprintf('Untyped multifield records are not '
                                         . "allowed at %s->[%u].\n",
                                     $path,
                                     $i);
@@ -378,8 +382,7 @@ sub verify_arrays($$$$)
 
                         if (match_syntax_value($syn_field, $data_field))
                         {
-                            logger(DEBUG,
-                                   "Comparing `%s->[%u]:%s' against `%s'.",
+                            logger("Comparing `%s->[%u]:%s' against `%s'.",
                                    $path,
                                    $i,
                                    join('|', keys(%{$data->[$i]})),
@@ -408,7 +411,7 @@ sub verify_arrays($$$$)
 
                 if ($local_status eq '')
                 {
-                    $$status .= sprintf("Unexpected typed record with field "
+                    $$status .= sprintf('Unexpected typed record with field '
                                             . "`%s' found at %s->[%u].\n",
                                         $data_field,
                                         $path,
@@ -480,7 +483,7 @@ sub verify_hashes($$$$)
     {
         if (not exists($data->{$mandatory_field}))
         {
-            $$status .= sprintf("The %s record does not contain the mandatory "
+            $$status .= sprintf('The %s record does not contain the mandatory '
                                     . "field `%s'.\n",
                                 $path,
                                 $mandatory_field);
@@ -521,7 +524,7 @@ sub verify_hashes($$$$)
 
         if (not defined($syn_el))
         {
-            $$status .= sprintf("The %s record contains an invalid field "
+            $$status .= sprintf('The %s record contains an invalid field '
                                     . "`%s'.\n",
                                 $path,
                                 $field)
@@ -529,7 +532,7 @@ sub verify_hashes($$$$)
             next hash_key;
         }
 
-        logger(DEBUG, "Comparing `%s->%s:%s' against `%s'.",
+        logger("Comparing `%s->%s:%s' against `%s'.",
                $path,
                $field,
                (ref($data->{$field}) eq '')
@@ -545,13 +548,13 @@ sub verify_hashes($$$$)
             if (not match_syntax_value($syn_el, $data->{$field}, \$err))
             {
                 $$status .= sprintf("Unexpected %s found at %s. It doesn't "
-                                        . "match the expected value "
+                                        . 'match the expected value '
                                         . "format%s.\n",
                                     defined($data->{$field})
-                                        ? "value `" . $data->{$field} . "'"
-                                        : "undefined value",
+                                        ? 'value `' . $data->{$field} . "'"
+                                        : 'undefined value',
                                     $path . '->' . $field,
-                                    ($err ne '') ? "($err)" : '');
+                                    ($err ne '') ? " ($err)" : '');
             }
         }
         elsif ((ref($syn_el) eq 'ARRAY' and ref($data->{$field}) eq 'ARRAY')
@@ -565,7 +568,7 @@ sub verify_hashes($$$$)
         }
         elsif (ref($syn_el) eq '')
         {
-            $$status .= sprintf("The %s field does not contain a simple "
+            $$status .= sprintf('The %s field does not contain a simple '
                                     . "value.\n",
                                 $path . '->' . $field);
         }
@@ -617,7 +620,6 @@ sub match_syntax_value($$;$)
     my ($arg,
         $result,
         $type);
-    my $logger_context = Log::Application::Context->new('Syntax');
 
     # Decide what to do based upon the header.
 
@@ -691,7 +693,7 @@ sub match_syntax_value($$;$)
                   $syntax)
                 if (defined($min) and defined($max) and $min  > $max);
             throw("%s(syntax = `%s', minimum/maximum values are not "
-                      . "compatible with step value).",
+                      . 'compatible with step value).',
                   SCHEMA_ERROR,
                   $syntax)
                 if (defined($step)
@@ -710,7 +712,7 @@ sub match_syntax_value($$;$)
                     sprintf('integer between %s and %s%s',
                             defined($min) ? $min : '<No Lower Limit>',
                             defined($max) ? $max : '<No Upper Limit>',
-                            defined($step) ? " with a step size of $max" : '');
+                            defined($step) ? " with a step size of $step" : '');
             }
         }
         else
@@ -743,7 +745,7 @@ sub match_syntax_value($$;$)
         $result = 1 if ($arg eq $value);
     }
 
-    logger(DEBUG, "Comparing `%s' against `%s'. Match: %s.",
+    logger("Comparing `%s' against `%s'. Match: %s.",
            $syntax,
            $value,
            ($result) ? 'Yes' : 'No')
@@ -772,7 +774,6 @@ sub duration_to_seconds($)
 
     my $duration = $_[0];
 
-    my $logger_context = Log::Application::Context->new('Syntax');
     my $seconds = 0;
 
     if (lc($duration) =~ m/^(\d+)([smhdw])$/)
@@ -885,7 +886,9 @@ respectively.
 
 =item B<match_syntax_value($yntax, $value[, $error])>
 
-Tests the data in $value against an item in the syntax tree as given by $syntax. $error is a reference to a string that is to contain any type/value errors that are detected.
+Tests the data in $value against an item in the syntax tree as given by
+$syntax. $error is a reference to a string that is to contain any type/value
+errors that are detected.
 
 =back
 
@@ -996,5 +999,3 @@ with this library; if not, write to the Free Software Foundation, Inc., 59
 Temple Place - Suite 330, Boston, MA 02111-1307 USA.
 
 =cut
-
-1;
