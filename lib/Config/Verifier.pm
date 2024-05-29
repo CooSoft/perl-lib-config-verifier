@@ -200,6 +200,284 @@ sub verify($$$$)
 #
 ##############################################################################
 #
+#   Routine      - match_syntax_value
+#
+#   Description  - Tests a value against an item in the syntax tree.
+#
+#   Data         - $syntax      : The element in the syntax tree that the
+#                                 value is to be compared against.
+#                  $value       : The string that is to be compared against
+#                                 the syntax element.
+#                  $error_text  : A reference to the string that is to contain
+#                                 expected type or range mismatch information.
+#                                 This is optional.
+#                  Return Value : True for a match, otherwise false.
+#
+##############################################################################
+
+
+
+sub match_syntax_value($$;$)
+{
+
+    my ($syntax, $value, $error_text) = @_;
+
+    # We don't allow undefined values.
+
+    return unless(defined($value));
+
+    my ($arg,
+        $result,
+        $type);
+
+    # Decide what to do based upon the header.
+
+    if ($syntax =~ m/^([cfimRrstw]):(.*)/)
+    {
+        $type = $1;
+        $arg = $2;
+    }
+    else
+    {
+        throw("%s(syntax = `%s', value = `%s').",
+              SCHEMA_ERROR,
+              $syntax,
+              $value);
+    }
+    if ($type eq 'c')
+    {
+        $result = 1;
+    }
+    elsif ($type eq 'f')
+    {
+        my $float_re = '[-+]?(?=\d|\.\d)\d*(?:\.\d*)?(?:[Ee][-+]?\d+)?';
+        if ($arg =~ m/^(?:($float_re))?(?:,($float_re))?$/)
+        {
+            my ($min, $max) = ($1, $2);
+            throw("%s(syntax = `%s', minimum is greater than maximum).",
+                  SCHEMA_ERROR,
+                  $syntax)
+                if (defined($min) and defined($max) and $min  > $max);
+            if ($value =~ m/^$float_re$/
+                and (not defined($min) or $value >= $min)
+                and (not defined($max) or $value <= $max))
+            {
+                $result = 1;
+            }
+            elsif (defined($error_text))
+            {
+                $$error_text =
+                    sprintf('float between %s and %s',
+                            defined($min) ? $min : '<No Lower Limit>',
+                            defined($max) ? $max : '<No Upper Limit>');
+            }
+        }
+        else
+        {
+            throw("%s(syntax = `%s', value = `%s').",
+                  SCHEMA_ERROR,
+                  $syntax,
+                  $value);
+        }
+    }
+    elsif ($type =~ m/^[iw]$/)
+    {
+        my $re;
+        my $type_str;
+        if ($type eq 'i')
+        {
+            $re = '[-+]?\d+';
+            $type_str = 'integer';
+        }
+        else
+        {
+            $re = '\d+';
+            $type_str = 'whole';
+        }
+        if ($arg =~ m/^(?:($re))?(?:,($re))?(?:,($re))?$/)
+        {
+            my ($min, $max, $step) = ($1, $2, $3);
+            throw("%s(syntax = `%s', minimum is greater than maximum).",
+                  SCHEMA_ERROR,
+                  $syntax)
+                if (defined($min) and defined($max) and $min  > $max);
+            throw("%s(syntax = `%s', minimum/maximum values are not "
+                      . 'compatible with step value).',
+                  SCHEMA_ERROR,
+                  $syntax)
+                if (defined($step)
+                    and ((defined($min) and ($min % $step) != 0)
+                         or (defined($max) and ($max % $step) != 0)));
+            if ($value =~ m/^$re$/
+                and (not defined($min) or $value >= $min)
+                and (not defined($max) or $value <= $max)
+                and (not defined($step) or ($value % $step) == 0))
+            {
+                $result = 1;
+            }
+            elsif (defined($error_text))
+            {
+                $$error_text =
+                    sprintf('integer between %s and %s%s',
+                            defined($min) ? $min : '<No Lower Limit>',
+                            defined($max) ? $max : '<No Upper Limit>',
+                            defined($step) ? " with a step size of $step" : '');
+            }
+        }
+        else
+        {
+            throw("%s(syntax = `%s', value = `%s').",
+                  SCHEMA_ERROR,
+                  $syntax,
+                  $value);
+        }
+    }
+    elsif ($type eq 'R')
+    {
+        if (exists($syntax_regexes{$arg}))
+        {
+            $result = 1 if ($value =~ m/$syntax_regexes{$arg}/);
+        }
+        else
+        {
+            throw("%s(syntax = `%s', unknown syntactic regular expression).",
+                  SCHEMA_ERROR,
+                  $syntax);
+        }
+    }
+    elsif ($type eq 'r')
+    {
+        $result = 1 if ($value =~ m/$arg/);
+    }
+    else
+    {
+        $result = 1 if ($arg eq $value);
+    }
+
+    logger("Comparing `%s' against `%s'. Match: %s.",
+           $syntax,
+           $value,
+           ($result) ? 'Yes' : 'No')
+        if ($debug);
+
+    return $result;
+
+}
+#
+##############################################################################
+#
+#   Routine      - duration_to_milliseconds
+#
+#   Description  - Converts the given time duration into milliseconds.
+#
+#   Data         - $duration    : The time duration that is to be converted
+#                                 into milliseconds.
+#                  Return Value : The duration in milliseconds.
+#
+##############################################################################
+
+
+
+sub duration_to_milliseconds($)
+{
+
+    my $duration = $_[0];
+
+    my $milliseconds = 0;
+
+    if (lc($duration) =~ m/^(\d+)(ms|[smhdw])$/)
+    {
+        my ($amount, $unit) = ($1, $2);
+        if ($unit eq 'ms')
+        {
+            $milliseconds = $amount;
+        }
+        else
+        {
+            $milliseconds = duration_to_seconds($duration) * 1000;
+        }
+    }
+    else
+    {
+        throw("Invalid duration `%s' detected.", $duration);
+    }
+
+    return $milliseconds;
+
+}
+#
+##############################################################################
+#
+#   Routine      - duration_to_seconds
+#
+#   Description  - Converts the given time duration into seconds.
+#
+#   Data         - $duration    : The time duration that is to be converted
+#                                 into seconds.
+#                  Return Value : The duration in seconds.
+#
+##############################################################################
+
+
+
+sub duration_to_seconds($)
+{
+
+    my $duration = $_[0];
+
+    my $seconds = 0;
+
+    if (lc($duration) =~ m/^(\d+)([smhdw])$/)
+    {
+        my ($amount, $unit) = ($1, $2);
+        $seconds = $amount * $duration_in_seconds{$unit};
+    }
+    else
+    {
+        throw("Invalid duration `%s' detected.", $duration);
+    }
+
+    return $seconds;
+
+}
+#
+##############################################################################
+#
+#   Routine      - register_syntax_regex
+#
+#   Description  - Register the specified syntax element and pattern.
+#
+#   Data         - $name        : The name that is to be given to the syntax
+#                                 element.
+#                  $regex       : The regex specified as a regular string.
+#
+##############################################################################
+
+
+
+sub register_syntax_regex($$)
+{
+
+    my ($name, $regex) = @_;
+
+    # The name must be a simple variable like name and the regex pattern must be
+    # properly anchored.
+
+    throw("`%s' is not a suitable syntax element name.", $name)
+        if ($name !~ m/^[-[:alnum:]_.]+$/);
+    throw("`%s' is not anchored to the start and end of the string.", $regex)
+        if ($regex !~ m/^\^.*\$$/);
+
+    # Register it.
+
+    $syntax_regexes{$name} = qr/$regex/;
+
+    return;
+
+}
+#
+##############################################################################
+#
 #   Routine      - verify_arrays
 #
 #   Description  - Checks the specified structure making sure that the domain
@@ -587,284 +865,6 @@ sub verify_hashes($$$$)
         }
 
     }
-
-    return;
-
-}
-#
-##############################################################################
-#
-#   Routine      - match_syntax_value
-#
-#   Description  - Tests a value against an item in the syntax tree.
-#
-#   Data         - $syntax      : The element in the syntax tree that the
-#                                 value is to be compared against.
-#                  $value       : The string that is to be compared against
-#                                 the syntax element.
-#                  $error_text  : A reference to the string that is to contain
-#                                 expected type or range mismatch information.
-#                                 This is optional.
-#                  Return Value : True for a match, otherwise false.
-#
-##############################################################################
-
-
-
-sub match_syntax_value($$;$)
-{
-
-    my ($syntax, $value, $error_text) = @_;
-
-    # We don't allow undefined values.
-
-    return unless(defined($value));
-
-    my ($arg,
-        $result,
-        $type);
-
-    # Decide what to do based upon the header.
-
-    if ($syntax =~ m/^([cfimRrstw]):(.*)/)
-    {
-        $type = $1;
-        $arg = $2;
-    }
-    else
-    {
-        throw("%s(syntax = `%s', value = `%s').",
-              SCHEMA_ERROR,
-              $syntax,
-              $value);
-    }
-    if ($type eq 'c')
-    {
-        $result = 1;
-    }
-    elsif ($type eq 'f')
-    {
-        my $float_re = '[-+]?(?=\d|\.\d)\d*(?:\.\d*)?(?:[Ee][-+]?\d+)?';
-        if ($arg =~ m/^(?:($float_re))?(?:,($float_re))?$/)
-        {
-            my ($min, $max) = ($1, $2);
-            throw("%s(syntax = `%s', minimum is greater than maximum).",
-                  SCHEMA_ERROR,
-                  $syntax)
-                if (defined($min) and defined($max) and $min  > $max);
-            if ($value =~ m/^$float_re$/
-                and (not defined($min) or $value >= $min)
-                and (not defined($max) or $value <= $max))
-            {
-                $result = 1;
-            }
-            elsif (defined($error_text))
-            {
-                $$error_text =
-                    sprintf('float between %s and %s',
-                            defined($min) ? $min : '<No Lower Limit>',
-                            defined($max) ? $max : '<No Upper Limit>');
-            }
-        }
-        else
-        {
-            throw("%s(syntax = `%s', value = `%s').",
-                  SCHEMA_ERROR,
-                  $syntax,
-                  $value);
-        }
-    }
-    elsif ($type =~ m/^[iw]$/)
-    {
-        my $re;
-        my $type_str;
-        if ($type eq 'i')
-        {
-            $re = '[-+]?\d+';
-            $type_str = 'integer';
-        }
-        else
-        {
-            $re = '\d+';
-            $type_str = 'whole';
-        }
-        if ($arg =~ m/^(?:($re))?(?:,($re))?(?:,($re))?$/)
-        {
-            my ($min, $max, $step) = ($1, $2, $3);
-            throw("%s(syntax = `%s', minimum is greater than maximum).",
-                  SCHEMA_ERROR,
-                  $syntax)
-                if (defined($min) and defined($max) and $min  > $max);
-            throw("%s(syntax = `%s', minimum/maximum values are not "
-                      . 'compatible with step value).',
-                  SCHEMA_ERROR,
-                  $syntax)
-                if (defined($step)
-                    and ((defined($min) and ($min % $step) != 0)
-                         or (defined($max) and ($max % $step) != 0)));
-            if ($value =~ m/^$re$/
-                and (not defined($min) or $value >= $min)
-                and (not defined($max) or $value <= $max)
-                and (not defined($step) or ($value % $step) == 0))
-            {
-                $result = 1;
-            }
-            elsif (defined($error_text))
-            {
-                $$error_text =
-                    sprintf('integer between %s and %s%s',
-                            defined($min) ? $min : '<No Lower Limit>',
-                            defined($max) ? $max : '<No Upper Limit>',
-                            defined($step) ? " with a step size of $step" : '');
-            }
-        }
-        else
-        {
-            throw("%s(syntax = `%s', value = `%s').",
-                  SCHEMA_ERROR,
-                  $syntax,
-                  $value);
-        }
-    }
-    elsif ($type eq 'R')
-    {
-        if (exists($syntax_regexes{$arg}))
-        {
-            $result = 1 if ($value =~ m/$syntax_regexes{$arg}/);
-        }
-        else
-        {
-            throw("%s(syntax = `%s', unknown syntactic regular expression).",
-                  SCHEMA_ERROR,
-                  $syntax);
-        }
-    }
-    elsif ($type eq 'r')
-    {
-        $result = 1 if ($value =~ m/$arg/);
-    }
-    else
-    {
-        $result = 1 if ($arg eq $value);
-    }
-
-    logger("Comparing `%s' against `%s'. Match: %s.",
-           $syntax,
-           $value,
-           ($result) ? 'Yes' : 'No')
-        if ($debug);
-
-    return $result;
-
-}
-#
-##############################################################################
-#
-#   Routine      - duration_to_milliseconds
-#
-#   Description  - Converts the given time duration into milliseconds.
-#
-#   Data         - $duration    : The time duration that is to be converted
-#                                 into milliseconds.
-#                  Return Value : The duration in milliseconds.
-#
-##############################################################################
-
-
-
-sub duration_to_milliseconds($)
-{
-
-    my $duration = $_[0];
-
-    my $milliseconds = 0;
-
-    if (lc($duration) =~ m/^(\d+)(ms|[smhdw])$/)
-    {
-        my ($amount, $unit) = ($1, $2);
-        if ($unit eq 'ms')
-        {
-            $milliseconds = $amount;
-        }
-        else
-        {
-            $milliseconds = duration_to_seconds($duration) * 1000;
-        }
-    }
-    else
-    {
-        throw("Invalid duration `%s' detected.", $duration);
-    }
-
-    return $milliseconds;
-
-}
-#
-##############################################################################
-#
-#   Routine      - duration_to_seconds
-#
-#   Description  - Converts the given time duration into seconds.
-#
-#   Data         - $duration    : The time duration that is to be converted
-#                                 into seconds.
-#                  Return Value : The duration in seconds.
-#
-##############################################################################
-
-
-
-sub duration_to_seconds($)
-{
-
-    my $duration = $_[0];
-
-    my $seconds = 0;
-
-    if (lc($duration) =~ m/^(\d+)([smhdw])$/)
-    {
-        my ($amount, $unit) = ($1, $2);
-        $seconds = $amount * $duration_in_seconds{$unit};
-    }
-    else
-    {
-        throw("Invalid duration `%s' detected.", $duration);
-    }
-
-    return $seconds;
-
-}
-#
-##############################################################################
-#
-#   Routine      - register_syntax_regex
-#
-#   Description  - Register the specified syntax element and pattern.
-#
-#   Data         - $name        : The name that is to be given to the syntax
-#                                 element.
-#                  $regex       : The regex specified as a regular string.
-#
-##############################################################################
-
-
-
-sub register_syntax_regex($$)
-{
-
-    my ($name, $regex) = @_;
-
-    # The name must be a simple variable like name and the regex pattern must be
-    # properly anchored.
-
-    throw("`%s' is not a suitable syntax element name.", $name)
-        if ($name !~ m/^[-[:alnum:]_.]+$/);
-    throw("`%s' is not anchored to the start and end of the string.", $regex)
-        if ($regex !~ m/^\^.*\$$/);
-
-    # Register it.
-
-    $syntax_regexes{$name} = qr/$regex/;
 
     return;
 
