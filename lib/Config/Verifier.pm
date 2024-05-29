@@ -107,6 +107,7 @@ sub debug(;$)
     $debug = $_[0] if (defined($_[0]));
     return $debug;
 }
+sub duration_to_milliseconds($);
 sub duration_to_seconds($);
 sub match_syntax_value($$;$);
 sub register_syntax_regex($$);
@@ -134,7 +135,8 @@ sub verify_hashes($$$$);
 
 use base qw(Exporter);
 
-our %EXPORT_TAGS = (common_routines => [qw(duration_to_seconds
+our %EXPORT_TAGS = (common_routines => [qw(duration_to_milliseconds
+                                           duration_to_seconds
                                            match_syntax_value
                                            register_syntax_regex
                                            verify)]);
@@ -753,6 +755,48 @@ sub match_syntax_value($$;$)
         if ($debug);
 
     return $result;
+
+}
+#
+##############################################################################
+#
+#   Routine      - duration_to_milliseconds
+#
+#   Description  - Converts the given time duration into milliseconds.
+#
+#   Data         - $duration    : The time duration that is to be converted
+#                                 into milliseconds.
+#                  Return Value : The duration in milliseconds.
+#
+##############################################################################
+
+
+
+sub duration_to_milliseconds($)
+{
+
+    my $duration = $_[0];
+
+    my $milliseconds = 0;
+
+    if (lc($duration) =~ m/^(\d+)(ms|[smhdw])$/)
+    {
+        my ($amount, $unit) = ($1, $2);
+        if ($unit eq 'ms')
+        {
+            $milliseconds = $amount;
+        }
+        else
+        {
+            $milliseconds = duration_to_seconds($duration) * 1000;
+        }
+    }
+    else
+    {
+        throw("Invalid duration `%s' detected.", $duration);
+    }
+
+    return $milliseconds;
 
 }
 #
