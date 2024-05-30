@@ -232,7 +232,7 @@ sub match_syntax_value($$;$)
 
     # Decide what to do based upon the header.
 
-    if ($syntax =~ m/^([cfimRrstw]):(.*)/)
+    if ($syntax =~ m/^([cfimRrst]):(.*)/)
     {
         $type = $1;
         $arg = $2;
@@ -280,23 +280,15 @@ sub match_syntax_value($$;$)
                   $value);
         }
     }
-    elsif ($type =~ m/^[iw]$/)
+    elsif ($type eq 'i')
     {
-        my $re;
-        my $type_str;
-        if ($type eq 'i')
-        {
-            $re = '[-+]?\d+';
-            $type_str = 'integer';
-        }
-        else
-        {
-            $re = '\d+';
-            $type_str = 'whole';
-        }
-        if ($arg =~ m/^(?:($re))?(?:,($re))?(?:,($re))?$/)
+        my $int_re = '[-+]?\d+';
+        if ($arg =~ m/^($int_re|)(?:,($int_re|))?(?:,($int_re|))?$/)
         {
             my ($min, $max, $step) = ($1, $2, $3);
+            $min = undef if ($min eq '');
+            $max = undef if ($max eq '');
+            $step = undef if ($step eq '');
             throw("%s(syntax = `%s', minimum is greater than maximum).",
                   SCHEMA_ERROR,
                   $syntax)
@@ -308,7 +300,7 @@ sub match_syntax_value($$;$)
                 if (defined($step)
                     and ((defined($min) and ($min % $step) != 0)
                          or (defined($max) and ($max % $step) != 0)));
-            if ($value =~ m/^$re$/
+            if ($value =~ m/^$int_re$/
                 and (not defined($min) or $value >= $min)
                 and (not defined($max) or $value <= $max)
                 and (not defined($step) or ($value % $step) == 0))
