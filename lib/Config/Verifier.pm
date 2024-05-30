@@ -132,15 +132,15 @@ sub verify($$$$);
 # Private routines.
 
 sub generate_regexes();
-sub logger(@)
+sub logger($@)
 {
     STDERR->printf(@_);
     STDERR->print("\n");
     return;
 }
-sub throw(@)
+sub throw($@)
 {
-    croak(sprintf(@_));
+    croak(sprintf(shift(), @_));
 }
 sub verify_arrays($$$$);
 sub verify_hashes($$$$);
