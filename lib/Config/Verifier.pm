@@ -73,35 +73,51 @@ use constant SCHEMA_ERROR => 'Illegal syntax element found in syntax tree ';
 
 my $debug = 0;
 
-# A lookup hash for converting assorted durations into seconds.
+# Lookup hashes for converting assorted measures.
 
 my %duration_in_seconds = ('s' => 1,
                            'm' => 60,
-                           'h' => 3600,
-                           'd' => 86400,
-                           'w' => 604800);
+                           'h' => 3_600,
+                           'd' => 86_400,
+                           'w' => 604_800);
+my %amounts = ('K'   => 1_000,
+               'M'   => 1_000_000,
+               'G'   => 1_000_000_000,
+               'T'   => 1_000_000_000_000,
+               'KB'  => 1_000,
+               'MB'  => 1_000_000,
+               'GB'  => 1_000_000_000,
+               'TB'  => 1_000_000_000_000,
+               'KiB' => 1_024,
+               'MiB' => 1_048_576,
+               'GiB' => 1_073_741_824,
+               'TiB' => 1_099_511_627_776);
 
 # A lookup hash for common syntactic elements. Please note the (?!.) sequence at
 # the end matches nothing, i.e. '' and undef should go to false. The more
 # complex regexes are generated at load time.
 
 my %syntax_regexes =
-    (anything  => qr/^.+$/,
-     boolean   => qr/^(?i:true|yes|on|1|false|no|off|0|(?!.))$/,
-     duration  => qr/^(?i:\d+(?:ms|[smhdw]))$/,
-     float     => qr/^\d+(?:\.\d+)?$/,
-     name      => qr/^[-_.\'"()\[\] [:alnum:]]+$/,
-     path      => qr/^[[:alnum:][:punct:] ]+$/,
-     plugin    => qr/^[-_.[:alnum:]]+$/,
-     printable => qr/^[[:print:]]+$/,
-     string    => qr/^[-_. [:alnum:]]+$/,
-     user_name => qr/^[-_ [:alnum:]]+$/,
-     variable  => qr/^[[:alnum:]_]+$/);
+    (amount                => qr/^\d+[KMGT]?$/,
+     amount_data           => qr/^\d+(?:[KMGT]i?)?[Bb]$/,
+     anything              => qr/^.+$/,
+     boolean               => qr/^(?i:true|yes|on|1|false|no|off|0|(?!.))$/,
+     duration_milliseconds => qr/^\d+(?:ms|[smhdw])$/,
+     duration_seconds      => qr/^\d+[smhdw]$/,
+     float                 => qr/^\d+(?:\.\d+)?$/,
+     name                  => qr/^[-_.\'"()\[\] [:alnum:]]+$/,
+     path                  => qr/^[[:alnum:][:punct:] ]+$/,
+     plugin                => qr/^[-_.[:alnum:]]+$/,
+     printable             => qr/^[[:print:]]+$/,
+     string                => qr/^[-_. [:alnum:]]+$/,
+     user_name             => qr/^[-_ [:alnum:]]+$/,
+     variable              => qr/^[[:alnum:]_]+$/);
 
 # ***** FUNCTIONAL PROTOTYPES *****
 
 # Public routines.
 
+sub amount_to_units($);
 sub debug(;$)
 {
     $debug = $_[0] if (defined($_[0]));
@@ -135,7 +151,8 @@ sub verify_hashes($$$$);
 
 use base qw(Exporter);
 
-our %EXPORT_TAGS = (common_routines => [qw(duration_to_milliseconds
+our %EXPORT_TAGS = (common_routines => [qw(amount_to_units
+                                           duration_to_milliseconds
                                            duration_to_seconds
                                            match_syntax_value
                                            register_syntax_regex
@@ -358,6 +375,49 @@ sub match_syntax_value($$;$)
 #
 ##############################################################################
 #
+#   Routine      - amount_to_units
+#
+#   Description  - Converts the given amount into units.
+#
+#   Data         - $value       : The amount that is to be converted into
+#                                 units.
+#                  Return Value : The units.
+#
+##############################################################################
+
+
+
+sub amount_to_units($)
+{
+
+    my $value = $_[0];
+
+    my $units = 0;
+
+    if ($value =~ m/^(\d+)([KMGT])?$/
+        or $value =~ m/^(\d+)((?:[KMGT]i?)?[Bb])$/)
+    {
+        my ($amount, $unit) = ($1, $2);
+        if (defined($unit))
+        {
+            $units = $amount * $amounts{$unit};
+        }
+        else
+        {
+            $units = $amount;
+        }
+    }
+    else
+    {
+        throw("Invalid amount `%s' detected.", $value);
+    }
+
+    return $units;
+
+}
+#
+##############################################################################
+#
 #   Routine      - duration_to_milliseconds
 #
 #   Description  - Converts the given time duration into milliseconds.
@@ -377,7 +437,7 @@ sub duration_to_milliseconds($)
 
     my $milliseconds = 0;
 
-    if (lc($duration) =~ m/^(\d+)(ms|[smhdw])$/)
+    if ($duration =~ m/^(\d+)(ms|[smhdw])$/)
     {
         my ($amount, $unit) = ($1, $2);
         if ($unit eq 'ms')
@@ -419,7 +479,7 @@ sub duration_to_seconds($)
 
     my $seconds = 0;
 
-    if (lc($duration) =~ m/^(\d+)([smhdw])$/)
+    if ($duration =~ m/^(\d+)([smhdw])$/)
     {
         my ($amount, $unit) = ($1, $2);
         $seconds = $amount * $duration_in_seconds{$unit};
