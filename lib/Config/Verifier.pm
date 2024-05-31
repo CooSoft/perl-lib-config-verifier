@@ -707,17 +707,18 @@ sub verify_arrays($$$$)
 
                         # Don't allow non-typed records.
 
-                        throw('%s(untyped records are not allowed)',
+                        throw('%s(untyped records are not allowed).',
                               SCHEMA_ERROR)
                             unless (keys(%$syn_el) == 1);
 
-                        # Only allow plain strings as field names.
+                        # Only allow field names that are either constant or
+                        # some sort of value. If there are duplicate values then
+                        # too bad as the first match will be taken.
 
                         my $syn_field = (keys(%$syn_el))[0];
-                        throw("%s(record typefields must be of type `m:', `s:' "
-                                  . "or `t:')",
+                        throw("%s(record type fields cannot by of type `c:').",
                               SCHEMA_ERROR)
-                            unless ($syn_field =~ m/^[mst]:/);
+                            if ($syn_field eq 'c:');
 
                         if (match_syntax_value($syn_field, $data_field))
                         {
