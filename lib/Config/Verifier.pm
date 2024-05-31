@@ -6,10 +6,8 @@
 #                  with regards to the structure of that data and the basic
 #                  data types. This module sort of behaves like a schema
 #                  validator. However, the data type and value checking is
-#                  limited to what you can express as a simple string or
-#                  regular expression. For example, you can check that a value
-#                  is a correct enumeration or that a number is an integer or
-#                  a float but not the value of that number against a range.
+#                  limited to what you can express as a simple string, regular
+#                  expression or a numeric value range.
 #
 #   Authors      - A.E.Cooper.
 #
@@ -1037,12 +1035,12 @@ Config::Verifier - Verify the structure and values inside Perl data structures
                                             . '|DEBUG_SYSTEM_USERS_DUMP'
                                             . '|DEBUG_STACK_TRACES)$'],
             's:hostname_cache'          =>
-                {'s:ttl'            => SYNTAX_DURATION,
-                 's:purge_interval' => SYNTAX_DURATION},
-            's:lowercase_usernames'     => SYNTAX_BOOLEAN,
-            's:plugins_directory'       => SYNTAX_PATH,
-            's:system_users_cache_file' => SYNTAX_PATH,
-            's:use_syslog'              => SYNTAX_BOOLEAN});
+                {'s:ttl'            => 'R:duration_seconds',
+                 's:purge_interval' => 'R:duration_seconds'},
+            's:lowercase_usernames'     => 'R:boolean',
+            's:plugins_directory'       => 'R:path',
+            's:system_users_cache_file' => 'R:path',
+            's:use_syslog'              => 'R:boolean'});
   my $data = YAML::XS::LoadFile("my-config.yml");
   my $status = "";
   verify($data, \%settings_syntax_tree, "settings", \$status);
@@ -1052,11 +1050,26 @@ Config::Verifier - Verify the structure and values inside Perl data structures
 =head1 DESCRIPTION
 
 The Config::Verifier module checks the given Perl data structure against the
-specific syntax tree. This is particularly useful for when you parse and read in
-configuration data from say a YAML file where YAML does not provide any
-additional domain specific schema style validation of the data.
+specified syntax tree. Whilst it can be used to verify any textual data ingested
+into Perl, its main purpose is to check configuration data. It's also designed
+to be lightweight, not having any dependencies beyond the core Perl modules.
 
-=head1 ROUTINES
+When reading in configuration data from a file, it's up to the caller to decide
+exactly how this data is read in. Typically one would use some sort of parsing
+module like L<JSON> or L<YAML::XS> (which I have found to be the more stringent
+for YAML files).
+
+Whilst this module could be used to verify data from many sources, like RESTful
+API requests, you would invariably be better off with a module that could read
+in a proper schema in an officially recognised format. One such module, for
+validating both JSON and YAML is L<JSON::Validator>. However due to its very
+capable nature, it does pull in a lot of dependencies, which can be undesirable
+for smaller projects, hence this module.
+
+If this module is not to your liking then another option, which I believe
+supports ini style configuration files, is L<Config::Validator>.
+
+=head1 SUBROUTINES/METHODS
 
 =over 4
 
@@ -1065,45 +1078,77 @@ additional domain specific schema style validation of the data.
 Checks the specified structure making sure that the domain specific syntax is
 ok.
 
-\%data is a reference to the data structure that is to be checked, typically a
-hash, i.e. a record, but it can also be an array. \%syntax is a reference to a
-syntax tree that describes what data should be present and its basic
-format. Semantic checking is not supported, e.g. numeric range checking for
-example. $path is a string containing a descriptive name for the data structure
-being checked. This will be used as the base name in any error messages returned
-by this function. Lastly $status is a reference to a string that is to contain
-any error message resulting from parsing the data. $status should always be
-initialised to an empty string. Upon return if there's a problem with the data
-structure then the details will be contained within $status, otherwise it will
-be an empty string if everything is ok.
+C<\%data> is a reference to the data structure that is to be checked, typically
+a hash, i.e. a record, but it can also be an array. C<\%syntax> is a reference
+to a syntax tree that describes what data should be present and its basic
+format, including numeric ranges for numbers. C<$path> is a string containing a
+descriptive name for the data structure being checked. This will be used as the
+base name in any error messages returned by this function. Lastly C<$status> is
+a reference to a string that is to contain any error message resulting from
+parsing the data. C<$status> should always be initialised to an empty string.
+Upon return if there's a problem with the data structure then the details will
+be contained within C<$status>, otherwise it will be an empty string if
+everything is ok.
+
+=item B<amount_to_units($amount)>
+
+Converts the amount given in C<$amount> into units. An amount takes the form as
+described by C<'R:amount'> or C<'R:amount_data'> and is either a number
+optionally followed K, M, G, or T, or a number followed by KB, Kb, KiB, Kib up
+to up to TB etc respectively. For the data amounts B and b refer to bytes and
+bits, whilst KiB and KB refer to 1024 bytes and 1000 bytes and so on.
 
 =item B<debug([$flag])>
 
-Turns on the output of debug messages to STDERR when $flag is set to true,
-otherwise debug messages are turned off. If $flag isn't specified then nothing
-changes.
+Turns on the output of debug messages to C<STDERR> when C<$flag> is set to true,
+otherwise debug messages are turned off. If C<$flag> isn't specified then
+nothing changes.
+
+=item B<duration_to_milliseconds($duration)>
+
+Converts the time duration given in C<$duration> into milliseconds. A duration
+takes the form as described by C<'R:duration_milliseconds'> and is a number
+followed by a time unit that can be one of ms, s, m, h, d, or w for
+milliseconds, seconds, minutes, hours, days and weeks respectively.
 
 =item B<duration_to_seconds($duration)>
 
-Converts the time duration given in $duration into seconds. A duration takes the
-form as described by SYNTAX_DURATION and is a number followed by a time unit
-that can be one of s, m, h, d, or w for seconds, minutes, hours, days and weeks
+As above but for seconds. A duration takes the form as described by
+C<'R:duration_seconds'> and is a number followed by a time unit that can be one
+of s, m, h, d, or w for seconds, minutes, hours, days and weeks respectively.
+
+=item B<match_syntax_value($syntax, $value[, $error])>
+
+Tests the data in C<$value> against an item in the syntax tree as given by
+C<$syntax>. C<$error> is an optional reference to a string that is to contain
+any type/value errors that are detected.
+
+=item B<register_syntax_regex($name, $regex)>
+
+Registers the regular expression string C<$regex>, which is not a compiled RE
+object, as a syntax pattern under the name given in C<$name>. This is then
+available for use as C<'R:<Name>' just like the built in syntax patterns. This
+can be used to replace any built in pattern or extend the list of patterns. The
+regular expression must be anchored, i.e. start and end with ^ and $
 respectively.
 
-=item B<match_syntax_value($yntax, $value[, $error])>
+=item B<string_to_boolean($string)>
 
-Tests the data in $value against an item in the syntax tree as given by
-$syntax. $error is a reference to a string that is to contain any type/value
-errors that are detected.
+Converts the amount given in C<$string> into a boolean (1 or 0). A string
+representing a boolean takes the form as described by C<'R:boolean'> and can be
+one of true, yes, Y, y, or on for true and false, no N, n, off or '' for false.
 
 =back
 
 =head1 RETURN VALUES
 
-verify() returns nothing. debug() returns the previous debug message setting as
-a boolean. duration_to_seconds() returns the number of seconds that the
-specified duration represents. Lastly match_syntax_value() returns true for a
-match, otherwise false for no match.
+C<verify()> returns nothing. C<amount_to_units()> returns an integer. C<debug()>
+returns the previous debug message setting as a boolean.
+C<duration_to_milliseconds()> and C<duration_to_seconds()> returns the number of
+milliseconds and seconds that the specified duration represents respectively.
+C<match_syntax_value()> returns true for a match, otherwise false for no
+match. C<register_syntax_regex()> returns nothing. Lastly C<string_to_boolean()>
+returns a boolean.
 
 =head1 NOTES
 
@@ -1111,39 +1156,47 @@ match, otherwise false for no match.
 
 =over 4
 
-=item B<:syntax_elements>
-
-When this import tag is used the following constants representing common syntax
-elements are imported into the calling name space:
-
-    SYNTAX_ANY
-    SYNTAX_BOOLEAN
-    SYNTAX_CIDR4
-    SYNTAX_DURATION
-    SYNTAX_FLOAT
-    SYNTAX_HOSTNAME
-    SYNTAX_INTEGER
-    SYNTAX_IP4_ADDR
-    SYNTAX_MACHINE
-    SYNTAX_NAME
-    SYNTAX_NATURAL
-    SYNTAX_PATH
-    SYNTAX_PLUGIN
-    SYNTAX_PRINTABLE
-    SYNTAX_STRING
-    SYNTAX_USER_NAME
-    SYNTAX_VARIABLE
-
 =item B<:common_routines>
 
 When this import tag is used the following routines are imported into the
 calling name space:
 
-    verify
+    amount_to_units
+    duration_to_milliseconds
     duration_to_seconds
     match_syntax_value
+    register_syntax_regex
+    string_to_boolean
+    verify
 
 =back
+
+=head2 Syntax Patterns
+
+Syntax patterns are used to match against specific values. These are expressed
+as anchored regular expressions and can be registered, either built in or
+registered by the caller an runtime (denoted by C<'R:'>), or simply provided
+directly in the syntax tree (denoted by C<'r:'>).
+
+The built in registered ones are:
+
+    R:amount
+    R:amount_data
+    R:anything
+    R:boolean
+    R:duration_milliseconds
+    R:duration_seconds
+    R:float
+    R:name
+    R:path
+    R:plugin
+    R:printable
+    R:string
+    R:user_name
+    R:variable
+
+One can add to the built in list or replace existing entries by using
+C<register_syntax_regex()>.
 
 =head2 Syntax Trees
 
@@ -1154,40 +1207,66 @@ records or lists, or strings that describe the type of value that should be
 present for that field. Key names are strings that consist of a type character
 followed by a colon and then the field name. Key and value types are as follows:
 
-    c:     - Custom entries follow, i.e. a key lookup failure isn't an
-             error. This is used to cater for parts of a syntax tree that
-             need to be dynamic and need to be handled separately.
-    m:     - A mandatory field, case sensitive.
-    r:     - A regular expression.
-    s:     - A plain string, typically an optional field, case sensitive.
-    Arrays - These represent not only that a list of items should be present
-             but also that there can be a choice in the different types of
-             items, e.g scalar, list or hash.
-    Hashes - These represent records with named fields.
+    c:      - Custom entries follow, i.e. a key lookup failure isn't an
+              error. This is used to cater for parts of a syntax tree that
+              need to be dynamic and need to be handled separately.
+    f:m,M   - A floating point number with optional minimum and Maximum
+              qualifiers.
+    i:m,M,s - An integer with optional minimum, Maximum and step qualifiers.
+    m:s     - A plain string literal s, invariably representing the name of
+              a mandatory field, which is case sensitive.
+    R:n     - A built in regular expression with the name n, that is used to
+              match against acceptable values. This can also be used to
+              match against optional fields that fit that pattern.
+    r:reg   - Like R:n but the regular expression is supplied by the caller.
+    s:s     - A plain string literal s, typically representing the the name
+              of an optional field, which is case sensitive.
+    t:s     - Like m: but also signifies a typed field, i.e. a field that
+              uniquely identifies the type of the record via its value. Its
+              corresponding value must uniquely identify the type of record
+              within the list of records at that point in the schema.
+    Arrays  - These represent not only that a list of items should be
+              present but also that there can be a choice in the different
+              types of items, e.g scalar, list or hash.
+    Hashes  - These represent records with named fields.
 
-Typically keys can be anything other than containers and values are regular
-expressions or containers. The SYNTAX_ style constants mentioned above provide
-regular expressions for the more common syntax elements.
+Typically keys can be anything other than containers and values are specific
+types, regular expressions or containers. The R: style syntax patterns mentioned
+above provide regular expressions for the more common syntax elements.
 
-Please see the example under SYNOPSIS.
+Please see the example under L</SYNOPSIS>.
+
+=head1 DIAGNOSTICS
+
+One can generate loads of tracing messages to C<STDERR> when debug mode is
+turned on via the C<debug()> function.
+
+Exceptions are thrown when there is a problem with the supplied syntax tree.
+
+=head1 DEPENDENCIES
+
+None beyond the core Perl modules.
 
 =head1 SEE ALSO
 
-https://metacpan.org/pod/Config::Validator
+L<Config::Validator>,
+L<JSON::Validator>,
+L<JSON>,
+L<YAML::XS>
 
-=head1 BUGS
+=head1 BUGS AND LIMITATIONS
 
 This module is certainly not exhaustive and doesn't contain support for parsing
-MS-DOS style file paths, although that would be trivial to do. Also not
+non-Linux related items, although that would be trivial to add. Also not
 everything can be checked. Maybe a future enhancement could be to have a code
 reference mechanism whereby code snippets could be included in the syntax tree.
 
-=head1 AUTHORS
+=head1 AUTHOR
 
-Anthony Cooper. Currently maintained by Anthony Cooper. Please report all faults
-and suggestions to <aecooper@cpan.org>.
+Anthony Edward Cooper. Please report all faults and suggestions to
+<aecooper@cpan.org>.
 
-=head1 COPYRIGHT
+=head1 LICENSE AND COPYRIGHT
 
 Copyright (C) 2024 by Anthony Cooper <aecooper@cpan.org>.
 
