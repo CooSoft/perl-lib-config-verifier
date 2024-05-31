@@ -101,7 +101,8 @@ my %syntax_regexes =
     (amount                => qr/^\d+[KMGT]?$/,
      amount_data           => qr/^\d+(?:[KMGT]i?)?[Bb]$/,
      anything              => qr/^.+$/,
-     boolean               => qr/^(?i:true|yes|on|1|false|no|off|0|(?!.))$/,
+     boolean               => qr/^(?:true|yes|[Yy]|on|1|
+                                     false|no|[Nn]|off|0|(?!.))$/x,
      duration_milliseconds => qr/^\d+(?:ms|[smhdw])$/,
      duration_seconds      => qr/^\d+[smhdw]$/,
      float                 => qr/^\d+(?:\.\d+)?$/,
@@ -127,6 +128,10 @@ sub duration_to_milliseconds($);
 sub duration_to_seconds($);
 sub match_syntax_value($$;$);
 sub register_syntax_regex($$);
+sub string_to_boolean($)
+{
+    return ($_[0] =~ m/^(?:true|yes|[Yy]|on|1)$/) ? 1 : 0;
+}
 sub verify($$$$);
 
 # Private routines.
@@ -156,6 +161,7 @@ our %EXPORT_TAGS = (common_routines => [qw(amount_to_units
                                            duration_to_seconds
                                            match_syntax_value
                                            register_syntax_regex
+                                           string_to_boolean
                                            verify)]);
 our @EXPORT_OK = qw(debug);
 Exporter::export_ok_tags(qw(common_routines));
