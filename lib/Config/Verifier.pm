@@ -1030,8 +1030,8 @@ Config::Verifier - Verify the structure and values inside Perl data structures
                                             . '|DEBUG_SYSTEM_USERS_DUMP'
                                             . '|DEBUG_STACK_TRACES)$'],
             's:hostname_cache'          =>
-                {'s:ttl'            => 'R:duration_seconds',
-                 's:purge_interval' => 'R:duration_seconds'},
+                {'s:ttl'            => 'R:duration',
+                 's:purge_interval' => 'R:duration'},
             's:lowercase_usernames'     => 'R:boolean',
             's:plugins_directory'       => 'R:path',
             's:system_users_cache_file' => 'R:path',
@@ -1085,26 +1085,21 @@ Upon return if there's a problem with the data structure then the details will
 be contained within C<$status>, otherwise it will be an empty string if
 everything is ok.
 
-=item B<amount_to_units($amount)>
+=item B<amount_to_units($amount)[, $want_bits]>
 
 Converts the amount given in C<$amount> into units. An amount takes the form as
 described by C<'R:amount'> or C<'R:amount_data'> and is either a number
 optionally followed K, M, G, or T, or a number followed by KB, Kb, KiB, Kib up
 to up to TB etc respectively. For the data amounts B and b refer to bytes and
-bits, whilst KiB and KB refer to 1024 bytes and 1000 bytes and so on.
+bits, whilst KiB and KB refer to 1024 bytes and 1000 bytes and so on. If
+C<$want_bits> is set to true then the returned amount is in bits rather than
+bytes. The default default is false and it only applies to amounts of data.
 
 =item B<debug([$flag])>
 
 Turns on the output of debug messages to C<STDERR> when C<$flag> is set to true,
 otherwise debug messages are turned off. If C<$flag> isn't specified then
 nothing changes.
-
-=item B<duration_to_milliseconds($duration)>
-
-Converts the time duration given in C<$duration> into milliseconds. A duration
-takes the form as described by C<'R:duration_milliseconds'> and is a number
-followed by a time unit that can be one of ms, s, m, h, d, or w for
-milliseconds, seconds, minutes, hours, days and weeks respectively.
 
 =item B<duration_to_seconds($duration)>
 
@@ -1139,11 +1134,10 @@ one of true, yes, Y, y, or on for true and false, no N, n, off or '' for false.
 
 C<verify()> returns nothing. C<amount_to_units()> returns an integer. C<debug()>
 returns the previous debug message setting as a boolean.
-C<duration_to_milliseconds()> and C<duration_to_seconds()> returns the number of
-milliseconds and seconds that the specified duration represents respectively.
-C<match_syntax_value()> returns true for a match, otherwise false for no
-match. C<register_syntax_regex()> returns nothing. Lastly C<string_to_boolean()>
-returns a boolean.
+C<duration_to_seconds()> returns the number of seconds that the specified
+duration represents.  C<match_syntax_value()> returns true for a match,
+otherwise false for no match. C<register_syntax_regex()> returns nothing. Lastly
+C<string_to_boolean()> returns a boolean.
 
 =head1 NOTES
 
@@ -1157,7 +1151,6 @@ When this import tag is used the following routines are imported into the
 calling name space:
 
     amount_to_units
-    duration_to_milliseconds
     duration_to_seconds
     match_syntax_value
     register_syntax_regex
@@ -1179,14 +1172,18 @@ The built in registered ones are:
     R:amount_data
     R:anything
     R:boolean
-    R:duration_milliseconds
-    R:duration_seconds
-    R:float
+    R:cidrv4
+    R:cidrv6
+    R:duration
+    R:hostname
+    R:ipv4_addr
+    R:ipv6_addr
+    R:machine
     R:name
-    R:path
     R:plugin
     R:printable
     R:string
+    R:unix_path
     R:user_name
     R:variable
 
