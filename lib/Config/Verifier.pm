@@ -71,26 +71,30 @@ my %amounts = ('K'   => 1_000,
                'GiB' => 1_073_741_824,
                'TiB' => 1_099_511_627_776);
 
+# A lookup hash containing regexes in the form or plain strings that will get
+# replaced by their compiled counterparts, whilst having their non-capturing
+# counterparts added to the %syntac_regexes hash below. This reduces maintenance
+# and mistakes.
+
+my %capturing_regexes = (amount      => '^([-+]?\d+(?:\.\d+)?)([KMGT])?$',
+                         amount_data => '^(\d+)((?:[KMGT]i?)?[Bb])$',
+                         duration    => '^(\d+)(ms|[smhdw])$');
+
 # A lookup hash for common syntactic elements. Please note the (?!.) sequence at
 # the end matches nothing, i.e. '' and undef should go to false. The more
 # complex regexes are generated at load time.
 
 my %syntax_regexes =
-    (amount                => qr/^\d+[KMGT]?$/,
-     amount_data           => qr/^\d+(?:[KMGT]i?)?[Bb]$/,
-     anything              => qr/^.+$/,
+    (anything              => qr/^.+$/,
      boolean               => qr/^(?:true|yes|[Yy]|on|1|
                                      false|no|[Nn]|off|0|(?!.))$/x,
-     duration_milliseconds => qr/^\d+(?:ms|[smhdw])$/,
-     duration_seconds      => qr/^\d+[smhdw]$/,
-     float                 => qr/^\d+(?:\.\d+)?$/,
      name                  => qr/^[-_.\'"()\[\] [:alnum:]]+$/,
-     path                  => qr/^[[:alnum:][:punct:] ]+$/,
      plugin                => qr/^[-_.[:alnum:]]+$/,
      printable             => qr/^[[:print:]]+$/,
      string                => qr/^[-_. [:alnum:]]+$/,
-     user_name             => qr/^[-_ [:alnum:]]+$/,
-     variable              => qr/^[[:alnum:]_]+$/);
+     unix_path             => qr/^(?:(?!\\\/|\000).)+$/,
+     user_name             => qr/^[-_[:alnum:]]+[-_ [:alnum:]]+[-_[:alnum:]]+$/,
+     variable              => qr/^[[:alpha:]_][[:alnum:]_]+$/);
 
 # ***** FUNCTIONAL PROTOTYPES *****
 
@@ -340,7 +344,17 @@ sub match_syntax_value($$;$)
     }
     elsif ($type eq 'r')
     {
-        $result = 1 if ($value =~ m/$arg/);
+        local $@;
+        eval
+        {
+            $result = 1 if ($value =~ m/$arg/);
+        };
+        if ($@)
+        {
+            my $err = $@;
+            $err =~ s/ at .+ line \d+\..*//gs;
+            throw($err);
+        }
     }
     else
     {
@@ -506,7 +520,17 @@ sub register_syntax_regex($$)
 
     # Register it.
 
-    $syntax_regexes{$name} = qr/$regex/;
+    local $@;
+    eval
+    {
+        $syntax_regexes{$name} = qr/$regex/;
+    };
+    if ($@)
+    {
+        my $err = $@;
+        $err =~ s/ at .+ line \d+\..*//gs;
+        throw($err);
+    }
 
     return;
 
@@ -961,6 +985,16 @@ sub generate_regexes()
     {
         $res{$name} =~ s/\(/(?:/g;
         $syntax_regexes{$name} = qr/^(?:$res{$name})$/;
+    }
+
+    # Now compile up the capturing regex strings into capturing and
+    # non-capturing objects.
+
+    for my $name (keys(%capturing_regexes))
+    {
+        my $non_capturing = ($capturing_regexes{$name} =~ s/\((?!\?:)/(?:/gr);
+        $syntax_regexes{$name} = qr/$non_capturing/;
+        $capturing_regexes{$name} = qr/$capturing_regexes{$name}/;
     }
 
     return;
