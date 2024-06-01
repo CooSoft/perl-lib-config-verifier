@@ -58,7 +58,8 @@ my %duration_in_seconds = ('s' => 1,
                            'h' => 3_600,
                            'd' => 86_400,
                            'w' => 604_800);
-my %amounts = ('K'   => 1_000,
+my %amounts = ('B'   => 1,
+               'K'   => 1_000,
                'M'   => 1_000_000,
                'G'   => 1_000_000_000,
                'T'   => 1_000_000_000_000,
@@ -100,13 +101,12 @@ my %syntax_regexes =
 
 # Public routines.
 
-sub amount_to_units($);
+sub amount_to_units($;$);
 sub debug(;$)
 {
     $debug = $_[0] if (defined($_[0]));
     return $debug;
 }
-sub duration_to_milliseconds($);
 sub duration_to_seconds($);
 sub match_syntax_value($$;$);
 sub register_syntax_regex($$);
@@ -139,7 +139,6 @@ sub verify_hashes($$$$);
 use base qw(Exporter);
 
 our %EXPORT_TAGS = (common_routines => [qw(amount_to_units
-                                           duration_to_milliseconds
                                            duration_to_seconds
                                            match_syntax_value
                                            register_syntax_regex
@@ -379,26 +378,38 @@ sub match_syntax_value($$;$)
 #
 #   Data         - $value       : The amount that is to be converted into
 #                                 units.
+#                  $want_bits   : True if the amount is a data size and should
+#                                 be returned as bits and not bytes. This is
+#                                 optional and defaults to false.
 #                  Return Value : The units.
 #
 ##############################################################################
 
 
 
-sub amount_to_units($)
+sub amount_to_units($;$)
 {
 
-    my $value = $_[0];
+    my ($value, $want_bits) = @_;
 
     my $units = 0;
 
-    if ($value =~ m/^(\d+)([KMGT])?$/
-        or $value =~ m/^(\d+)((?:[KMGT]i?)?[Bb])$/)
+    if ((not $want_bits and $value =~ m/$capturing_regexes{amount}/)
+        or $value =~ m/$capturing_regexes{amount_data}/)
     {
         my ($amount, $unit) = ($1, $2);
         if (defined($unit))
         {
-            $units = $amount * $amounts{$unit};
+            $units = $amount * $amounts{($unit =~ s/b/B/gr)};
+            my $given_as_bits = ($unit =~ m/.*b$/) ? 1 : 0;
+            if (not $given_as_bits and $want_bits)
+            {
+                $units *= 8;
+            }
+            elsif ($given_as_bits and not $want_bits)
+            {
+                $units /= 8;
+            }
         }
         else
         {
@@ -411,48 +422,6 @@ sub amount_to_units($)
     }
 
     return $units;
-
-}
-#
-##############################################################################
-#
-#   Routine      - duration_to_milliseconds
-#
-#   Description  - Converts the given time duration into milliseconds.
-#
-#   Data         - $duration    : The time duration that is to be converted
-#                                 into milliseconds.
-#                  Return Value : The duration in milliseconds.
-#
-##############################################################################
-
-
-
-sub duration_to_milliseconds($)
-{
-
-    my $duration = $_[0];
-
-    my $milliseconds = 0;
-
-    if ($duration =~ m/^(\d+)(ms|[smhdw])$/)
-    {
-        my ($amount, $unit) = ($1, $2);
-        if ($unit eq 'ms')
-        {
-            $milliseconds = $amount;
-        }
-        else
-        {
-            $milliseconds = duration_to_seconds($duration) * 1000;
-        }
-    }
-    else
-    {
-        throw("Invalid duration `%s' detected.", $duration);
-    }
-
-    return $milliseconds;
 
 }
 #
@@ -477,10 +446,17 @@ sub duration_to_seconds($)
 
     my $seconds = 0;
 
-    if ($duration =~ m/^(\d+)([smhdw])$/)
+    if ($duration =~ m/$capturing_regexes{duration}/)
     {
         my ($amount, $unit) = ($1, $2);
-        $seconds = $amount * $duration_in_seconds{$unit};
+        if ($unit eq 'ms')
+        {
+            $seconds = $amount / 1000;
+        }
+        else
+        {
+            $seconds = $amount * $duration_in_seconds{$unit};
+        }
     }
     else
     {
@@ -517,6 +493,11 @@ sub register_syntax_regex($$)
         if ($name !~ m/^[-[:alnum:]_.]+$/);
     throw("`%s' is not anchored to the start and end of the string.", $regex)
         if ($regex !~ m/^\^.*\$$/);
+    if (exists($capturing_regexes{$name}))
+    {
+        throw("Changing `%s' is not allowed as this could break related code.",
+              $name);
+    }
 
     # Register it.
 
