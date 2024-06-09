@@ -933,8 +933,10 @@ sub generate_regexes()
     # colons scattered around it's less confusing to use `(...)' rather than
     # `(?:...)'. This is then patched up afterwards.
 
-    my $label = '[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?';
+    my $label = '[[:alnum:]]([[:alnum:]-]{0,61}[[:alnum:]])?';
     my $byte = '25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d';
+    my $cidr4 = '(3[0-2]|[1-2]?\d)';
+    my $cidr6 = '(12[0-8]|1[0-1]\d|[1-9]?\d)';
     my $hex4 = '[0-9a-fA-F]{1,4}';
     my $ipv4 = "(($byte)\\.){3}($byte)";
     my @tail = (':',
@@ -949,23 +951,27 @@ sub generate_regexes()
     {
         $ipv6 = "$hex4:($ipv6|$tail)";
     }
-    $ipv6 = ":(:$hex4){0,5}((:$hex4){1,2}|:$ipv4)|$ipv6";
-    my $hostname = "($label\\.)*$label";
+    $ipv6 = "(:(:$hex4){0,5}((:$hex4){1,2}|:$ipv4)|$ipv6)";
+    my $hostname = "(?=.*[[:alpha:]])($label\\.)*$label";
+    my $ipv4_block = "$ipv4(/$cidr4)?";
+    my $ipv6_block = "$ipv6(/$cidr6)?";
 
-    my %res = (cidrv4    => "$ipv4/\\d+",
-               cidrv6    => "$ipv6/\\d+",
-               hostname  => "($label\\.)*$label",
-               ipv4_addr => $ipv4,
-               ipv6_addr => $ipv6,
-               machine   => "($hostname)|($ipv4)|($ipv6)");
+    my %regexes = (hostname   => $hostname,
+                   ipv4_addr  => $ipv4,
+                   ipv4_block => $ipv4_block,
+                   ipv4_cidr  => "$ipv4/$cidr4",
+                   ipv6_addr  => $ipv6,
+                   ipv6_block => $ipv6_block,
+                   ipv6_cidr  => "$ipv6/$cidr6",
+                   machine    => "($hostname)|($ipv4_block)|($ipv6_block)");
 
     # Make non-capturing, compile and then store the regexes in the main syntax
     # table.
 
-    foreach my $name (keys(%res))
+    foreach my $name (keys(%regexes))
     {
-        $res{$name} =~ s/\(/(?:/g;
-        $syntax_regexes{$name} = qr/^(?:$res{$name})$/;
+        $regexes{$name} =~ s/\((?!\?)/(?:/g;
+        $syntax_regexes{$name} = qr/^(?:$regexes{$name})$/;
     }
 
     # Now compile up the capturing regex strings into capturing and
@@ -973,7 +979,7 @@ sub generate_regexes()
 
     for my $name (keys(%capturing_regexes))
     {
-        my $non_capturing = ($capturing_regexes{$name} =~ s/\((?!\?:)/(?:/gr);
+        my $non_capturing = ($capturing_regexes{$name} =~ s/\((?!\?)/(?:/gr);
         $syntax_regexes{$name} = qr/$non_capturing/;
         $capturing_regexes{$name} = qr/$capturing_regexes{$name}/;
     }
@@ -1172,12 +1178,14 @@ The built in registered ones are:
     R:amount_data
     R:anything
     R:boolean
-    R:cidrv4
-    R:cidrv6
     R:duration
     R:hostname
     R:ipv4_addr
+    R:ipv4_block
+    R:ipv4_cidr
     R:ipv6_addr
+    R:ipv6_block
+    R:ipv6_cidr
     R:machine
     R:name
     R:plugin

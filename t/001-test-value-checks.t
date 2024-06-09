@@ -58,6 +58,25 @@ sub exception_protect($)
 my (@bad,
     @good);
 
+# Check floats.
+
+@good = qw(0 0.1 83478347 384.34878 +293289 +2873.5666 -33 -2385.66 0.1e10 +12e2
++1.2e-1 -0.2e-1 -2e+3 -2.057e4);
+@bad = (' 0.1', '0.1 ', '0.1.2', '0.1e1.2', '2e 3', '2.3 e3', '++6.6afe10');
+test_values(1, 'float format', 'f:', @good);
+test_values(0, 'float format', 'f:', @bad);
+@good = qw(83478347 384.34878 +293289 +2873.5666 2385.66 0.1e10 +12e2);
+@bad = qw(2.2 -1.44 100e-2);
+test_values(1, 'float minimum', 'f:10', @good);
+test_values(0, 'float minimum', 'f:10', @bad);
+test_values(1, 'float maximum', 'f:,10e12', @good);
+test_values(0, 'float maximum', 'f:,-10e2', @bad);
+test_values(1, 'float range', 'f:10,10e12', @good);
+test_values(0, 'float range', 'f:-10e2,-2', @bad);
+
+# exception_protect(sub { return amount_to_units($i); });
+# like($exception, qr/^Invalid amount .+ detected./, "amount_to_units [$i]");
+
 # Check amounts.
 
 @good = qw(0K 37467M 029838G 3784T 7.3 -3 4 -9K 9.8K -24.7G);
@@ -84,10 +103,6 @@ test_values(0, 'amount_data', 'R:amount_data', @bad);
 test_values(1, 'booleans', 'R:boolean', @good);
 test_values(0, 'booleans', 'R:boolean', @bad);
 
-# :TODO: Check R:cidrv4
-
-# :TODO: Check R:cidrv6
-
 # Check duration.
 
 @good = qw(66ms 5s 2m 3h 4d 1w 0w);
@@ -96,13 +111,77 @@ test_values(0, 'booleans', 'R:boolean', @bad);
 test_values(1, 'duration', 'R:duration', @good);
 test_values(0, 'duration', 'R:duration', @bad);
 
-# :TODO: Check R:hostname
+my (@bad_machine,
+    @good_machine);
 
-# :TODO: Check R:ipv4_addr
+# Check hostname.
 
-# :TODO: Check R:ipv6_addr
+@good = qw(www.google.com www.bbc.co.uk flower 01testbed-vm.lab.uk);
+@bad = ('-01test.bed', ' hello.com', 'goodbye.org ',
+        'still.not-valid_quite.com', 'nor-this.one.com.');
+test_values(1, 'hostname', 'R:hostname', @good);
+test_values(0, 'hostname', 'R:hostname', @bad);
+push(@good_machine, @good);
+push(@bad_machine, @bad);
 
-# :TODO: Check R:machine
+# Check IPv4.
+
+@good = ('192.168.1.0', '192.168.1.24', '10.0.0.1');
+@bad = ('192.168.1.1/24', ' 192.168.1.2', '192.168.1.2 ', 'AF.24.5.1',
+        '1.1.1.256', '1.1.399.1', '1.1.1.-1');
+test_values(1, 'IPv4 addresses', 'R:ipv4_addr', @good);
+test_values(0, 'IPv4 addresses', 'R:ipv4_addr', @bad);
+
+# Check IPv4 block (IP address or CIDR).
+
+@good = ('192.168.1.0/24', '192.168.1.24');
+@bad = (' 192.168.1.2/24', '192.168.1.2/24 ', 'AF.24.5.1/2', '1.1.1.256',
+        '1.1.1.-1');
+test_values(1, 'IPv4 block', 'R:ipv4_block', @good);
+test_values(0, 'IPv4 block', 'R:ipv4_block', @bad);
+push(@good_machine, @good);
+push(@bad_machine, @bad);
+
+# Check IPv4 CIDR.
+
+@good = ('192.168.1.0/24', '192.168.1.24/32', '10.0.0.1/0');
+@bad = ('192.168.1.1', ' 192.168.1.2/24', '192.168.1.2/24 ', 'AF.24.5.1/2',
+        '1.1.1.256/24', '1.1.1.1/33', '1.1.1.1/-1');
+test_values(1, 'IPv4 CIDR', 'R:ipv4_cidr', @good);
+test_values(0, 'IPv4 CIDR', 'R:ipv4_cidr', @bad);
+
+# Check IPv6.
+
+@good = ('04fa:0938:237::3927', '04fa:0938:237::3927', '::1');
+@bad = ('04fa:0938:237::3927/24', ' 04fa:0938:237::3927',
+        '04fa:0938:237::3927 ', '04fa:0938:g37::3927',
+        '04fa:0938:237::39271', '04fa:0938:237::-3927');
+test_values(1, 'IPv6 addresses', 'R:ipv6_addr', @good);
+test_values(0, 'IPv6 addresses', 'R:ipv6_addr', @bad);
+
+# Check IPv6 block (IP address or CIDR).
+
+@good = ('04fa:0938:237::3927', '04fa:0938:237::3927/128', '::1');
+@bad = (' 04fa:0938:237::3927/64', '04fa:0938:237::3927/28 ',
+        '04fa:0938:g37::3927/2', '04fa:0938:g37::39271');
+test_values(1, 'IPv6 block', 'R:ipv6_block', @good);
+test_values(0, 'IPv6 block', 'R:ipv6_block', @bad);
+push(@good_machine, @good);
+push(@bad_machine, @bad);
+
+# Check IPv6 CIDR.
+
+@good = ('04fa:0938:237::3927/64', '04fa:0938:237::3927/128', '::1/0');
+@bad = ('04fa:0938:237::3927', ' 04fa:0938:237::3927/64',
+        '04fa:0938:237::3927/28 ', '04fa:0938:g37::3927/2',
+        '04fa:0938:237::3927/129', '04fa:0938:237::3927/-128');
+test_values(1, 'IPv6 CIDR', 'R:ipv6_cidr', @good);
+test_values(0, 'IPv6 CIDR', 'R:ipv6_cidr', @bad);
+
+# Check machine (can be hostname, IP address or CIDR).
+
+test_values(1, 'machine', 'R:machine', @good_machine);
+test_values(0, 'machine', 'R:machine', @bad_machine);
 
 # Check path.
 
@@ -244,8 +323,6 @@ foreach my $i (' 100', ' 100K', '100K ', '--10'. '++10', '-10-', '+10+', '^',
          qr/^Invalid duration .+ detected./,
          "duration_to_seconds [$i]");
 }
-
-
 
 done_testing();
 
