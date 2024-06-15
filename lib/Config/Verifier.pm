@@ -243,10 +243,7 @@ sub match_syntax_value($$;$)
     }
     else
     {
-        throw("%s(syntax = `%s', value = `%s').",
-              SCHEMA_ERROR,
-              $syntax,
-              $value);
+        throw("%s(syntax = `%s').", SCHEMA_ERROR, $syntax);
     }
     if ($type eq 'c')
     {
@@ -278,21 +275,15 @@ sub match_syntax_value($$;$)
         }
         else
         {
-            throw("%s(syntax = `%s', value = `%s').",
-                  SCHEMA_ERROR,
-                  $syntax,
-                  $value);
+            throw("%s(syntax = `%s').", SCHEMA_ERROR, $syntax);
         }
     }
     elsif ($type eq 'i')
     {
         my $int_re = '[-+]?\d+';
-        if ($arg =~ m/^($int_re|)(?:,($int_re|))?(?:,($int_re|))?$/)
+        if ($arg =~ m/^(?:($int_re))?(?:,($int_re)?)?(?:,($int_re)?)?$/)
         {
             my ($min, $max, $step) = ($1, $2, $3);
-            $min = undef if ($min eq '');
-            $max = undef if ($max eq '');
-            $step = undef if ($step eq '');
             throw("%s(syntax = `%s', minimum is greater than maximum).",
                   SCHEMA_ERROR,
                   $syntax)
@@ -322,10 +313,7 @@ sub match_syntax_value($$;$)
         }
         else
         {
-            throw("%s(syntax = `%s', value = `%s').",
-                  SCHEMA_ERROR,
-                  $syntax,
-                  $value);
+            throw("%s(syntax = `%s').", SCHEMA_ERROR, $syntax);
         }
     }
     elsif ($type eq 'R')
@@ -699,7 +687,7 @@ sub verify_arrays($$$$)
                         # too bad as the first match will be taken.
 
                         my $syn_field = (keys(%$syn_el))[0];
-                        throw("%s(record type fields cannot by of type `c:').",
+                        throw("%s(record type fields cannot be of type `c:').",
                               SCHEMA_ERROR)
                             if ($syn_field eq 'c:');
 

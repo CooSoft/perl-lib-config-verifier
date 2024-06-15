@@ -73,9 +73,49 @@ test_values(1, 'float maximum', 'f:,10e12', @good);
 test_values(0, 'float maximum', 'f:,-10e2', @bad);
 test_values(1, 'float range', 'f:10,10e12', @good);
 test_values(0, 'float range', 'f:-10e2,-2', @bad);
+@bad = ('f: 10,20', 'f:10,20 ', ' f:10,20', 'f:10,20 ', 'f:10, 20', 'f:++10,20',
+        'f:10.23-e3,123.434', 'f:10.23,--123', 'f:1-.44,10.5+e5', 'f:1,2,3',
+        'f:10,5');
+foreach my $range (@bad)
+{
+    exception_protect(sub { return test_values(1,
+                                               'float bad range',
+                                               $range,
+                                               1); });
+    like($exception,
+         qr/^Illegal syntax element found in syntax tree/,
+         "float range [$range]");
+}
 
-# exception_protect(sub { return amount_to_units($i); });
-# like($exception, qr/^Invalid amount .+ detected./, "amount_to_units [$i]");
+# Check integers.
+
+@good = qw(0 1 83478347 +293289 -33);
+@bad = (' 0', '1 ', '0.1', '1e12', '2 3', '2.3 e3', '+6.6e10');
+test_values(1, 'integer format', 'i:', @good);
+test_values(0, 'integer format', 'i:', @bad);
+@good = qw(83478348 384 +293288 +2874 23886 10000);
+@bad = qw(2 -1 8 4 -33);
+test_values(1, 'integer minimum', 'i:10', @good);
+test_values(0, 'integer minimum', 'i:10', @bad);
+test_values(1, 'integer maximum', 'i:,100000000', @good);
+test_values(0, 'integer maximum', 'i:,-100', @bad);
+test_values(1, 'integer range', 'i:10,100000000', @good);
+test_values(0, 'integer range', 'i:-1000,-40', @bad);
+test_values(1, 'integer step', 'i:10,100000000,2', @good);
+test_values(0, 'integer step', 'i:-1000,-2,2', @bad);
+@bad = ('i: 10,20', 'i:10,20 ', ' i:10,20', 'i:10,20 ', 'i:10, 20', 'i:++10,20',
+        'i:23,--123', 'i:1-4,10.5e5', 'i:14,10.5e5', 'i:1,2,3,4', 'i:10,5',
+        'i:10,20,3');
+foreach my $range (@bad)
+{
+    exception_protect(sub { return test_values(1,
+                                               'integer bad range',
+                                               $range,
+                                               1); });
+    like($exception,
+         qr/^Illegal syntax element found in syntax tree/,
+         "integer range [$range]");
+}
 
 # Check amounts.
 
