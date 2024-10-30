@@ -1,15 +1,15 @@
 #!/usr/bin/perl
 
+use 5.036;
 use strict;
 use warnings;
+
 use Test::More;
 
 use Config::Verifier qw(:common_routines);
 
-sub test_values($$$@)
+sub test_values($good, $type, $syntax, @values)
 {
-
-    my ($good, $type, $syntax, @values) = @_;
 
     my %syntax_tree = ('m:value' => $syntax);
     for my $value (@values)
@@ -31,10 +31,8 @@ sub test_values($$$@)
 }
 
 my $exception = '';
-sub exception_protect($)
+sub exception_protect($fn)
 {
-
-    my $fn = $_[0];
 
     $exception = '';
 

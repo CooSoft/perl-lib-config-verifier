@@ -29,8 +29,7 @@ package Config::Verifier;
 
 # ***** DIRECTIVES *****
 
-require 5.012;
-
+use 5.036;
 use strict;
 use warnings;
 
@@ -99,38 +98,37 @@ my %syntax_regexes =
 
 # ***** FUNCTIONAL PROTOTYPES *****
 
-# Public routines.
-
-sub amount_to_units($;$);
-sub debug(;$)
-{
-    $debug = $_[0] if (defined($_[0]));
-    return $debug;
-}
-sub duration_to_seconds($);
-sub match_syntax_value($$;$);
-sub register_syntax_regex($$);
-sub string_to_boolean($)
-{
-    return ($_[0] =~ m/^(?:true|yes|[Yy]|on|1)$/) ? 1 : 0;
-}
-sub verify($$$$);
-
 # Private routines.
 
-sub generate_regexes();
-sub logger($@)
+state sub generate_regexes;
+state sub logger($format, @args)
 {
-    STDERR->printf(@_);
-    STDERR->print("\n");
+    STDERR->printf($format . "\n", @args);
     return;
 }
-sub throw($@)
+state sub throw($format, @args)
 {
-    croak(sprintf(shift(), @_));
+    croak(sprintf($format, @args));
 }
-sub verify_arrays($$$$);
-sub verify_hashes($$$$);
+state sub verify_arrays;
+state sub verify_hashes;
+
+# Public routines.
+
+sub amount_to_units;
+sub debug($value = undef)
+{
+    $debug = $value if (defined($value));
+    return $debug;
+}
+sub duration_to_seconds;
+sub match_syntax_value;
+sub register_syntax_regex;
+sub string_to_boolean($value)
+{
+    return ($value =~ m/^(?:true|yes|[Yy]|on|1)$/) ? 1 : 0;
+}
+sub verify;
 
 # ***** PACKAGE INFORMATION *****
 
@@ -172,10 +170,8 @@ our $VERSION = '1.0';
 
 
 
-sub verify($$$$)
+sub verify($data, $syntax, $path, $status)
 {
-
-    my ($data, $syntax, $path, $status) = @_;
 
     # Check arrays, these are not only lists but also branch points.
 
@@ -221,10 +217,8 @@ sub verify($$$$)
 
 
 
-sub match_syntax_value($$;$)
+sub match_syntax_value($syntax, $value, $error_text = undef)
 {
-
-    my ($syntax, $value, $error_text) = @_;
 
     # We don't allow undefined values.
 
@@ -375,10 +369,8 @@ sub match_syntax_value($$;$)
 
 
 
-sub amount_to_units($;$)
+sub amount_to_units($value, $want_bits = 0)
 {
-
-    my ($value, $want_bits) = @_;
 
     my $units = 0;
 
@@ -427,10 +419,8 @@ sub amount_to_units($;$)
 
 
 
-sub duration_to_seconds($)
+sub duration_to_seconds($duration)
 {
-
-    my $duration = $_[0];
 
     my $seconds = 0;
 
@@ -469,10 +459,8 @@ sub duration_to_seconds($)
 
 
 
-sub register_syntax_regex($$)
+sub register_syntax_regex($name, $regex)
 {
-
-    my ($name, $regex) = @_;
 
     # The name must be a simple variable like name and the regex pattern must be
     # properly anchored.
@@ -527,10 +515,8 @@ sub register_syntax_regex($$)
 
 
 
-sub verify_arrays($$$$)
+sub verify_arrays($data, $syntax, $path, $status)
 {
-
-    my ($data, $syntax, $path, $status) = @_;
 
     # Scan through the array looking for a match based upon scalar values and
     # container types.
@@ -773,10 +759,8 @@ sub verify_arrays($$$$)
 
 
 
-sub verify_hashes($$$$)
+sub verify_hashes($data, $syntax, $path, $status)
 {
-
-    my ($data, $syntax, $path, $status) = @_;
 
     my $custom_fields = grep(/^c\:$/, keys(%$syntax));
     my (@mandatory_fields);
