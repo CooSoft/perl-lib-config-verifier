@@ -16,8 +16,7 @@ sub test_values($good, $type, $syntax, @values)
     {
         my $data = {value => $value};
         my $path = 'Top';
-        my $status = '';
-        verify($data, \%syntax_tree, $path, \$status);
+        my $status = verify($data, \%syntax_tree, $path);
         if ($good)
         {
             is($status, '', "Good $type check [$value]");

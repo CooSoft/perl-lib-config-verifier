@@ -4,12 +4,9 @@
 #
 #   Description  - A module for checking the domain specific syntax of data
 #                  with regards to the structure of that data and the basic
-#                  data types. This module sort of behaves like a schema
-#                  validator. However, the data type and value checking is
-#                  limited to what you can express as a simple string, regular
-#                  expression or a numeric value range.
+#                  data types.
 #
-#   Author       - A.E.Cooper.
+#                  See the POD section for further details.
 #
 ##############################################################################
 #
@@ -17,7 +14,7 @@
 #
 #   Package      - Config::Verifier
 #
-#   Description  - See above.
+#   Description  - See the POD section for further details.
 #
 ##############################################################################
 
@@ -112,6 +109,7 @@ state sub throw($format, @args)
 }
 state sub verify_arrays;
 state sub verify_hashes;
+state sub verify_node;
 
 # Public routines.
 
@@ -128,7 +126,12 @@ sub string_to_boolean($value)
 {
     return ($value =~ m/^(?:true|yes|[Yy]|on|1)$/) ? 1 : 0;
 }
-sub verify;
+sub verify($data, $syntax, $name)
+{
+    my $status = '';
+    verify_node($data, $syntax, $name, \$status);
+    return $status;
+}
 
 # ***** PACKAGE INFORMATION *****
 
@@ -148,70 +151,9 @@ our $VERSION = '1.0';
 #
 ##############################################################################
 #
-#   Routine      - verify
-#
-#   Description  - Checks the specified structure making sure that the domain
-#                  specific syntax is ok.
-#
-#   Data         - $data   : A reference to the data item within the record
-#                            that is to be checked. This is either a reference
-#                            to an array or a hash as scalars are leaf nodes
-#                            and processed inline.
-#                  $syntax : A reference to that part of the syntax tree that
-#                            is going to be used to check the data referenced
-#                            by $data.
-#                  $path   : A string containing the current path through the
-#                            record for the current item in $data.
-#                  $status : A reference to a string that is to contain a
-#                            description of what is wrong. If everything is ok
-#                            then this string will be empty.
-#
-##############################################################################
-
-
-
-sub verify($data, $syntax, $path, $status)
-{
-
-    # Check arrays, these are not only lists but also branch points.
-
-    if (ref($data) eq 'ARRAY' and ref($syntax) eq 'ARRAY')
-    {
-        verify_arrays($data, $syntax, $path, $status);
-    }
-
-    # Check records.
-
-    elsif (ref($data) eq 'HASH' and ref($syntax) eq 'HASH')
-    {
-        verify_hashes($data, $syntax, $path, $status);
-    }
-
-    # We should never see any other types as scalars are dealt with on the spot.
-
-    else
-    {
-        throw('Settings syntax parser, internal state error detected.');
-    }
-
-    return;
-
-}
-#
-##############################################################################
-#
 #   Routine      - match_syntax_value
 #
-#   Description  - Tests a value against an item in the syntax tree.
-#
-#   Data         - $syntax      : The element in the syntax tree that the
-#                                 value is to be compared against.
-#                  $value       : The string that is to be compared against
-#                                 the syntax element.
-#                  $error_text  : A reference to the string that is to contain
-#                                 expected type or range mismatch information.
-#                                 This is optional.
-#                  Return Value : True for a match, otherwise false.
+#   Description  - Public routine. See the POD section for further details.
 #
 ##############################################################################
 
@@ -329,13 +271,14 @@ sub match_syntax_value($syntax, $value, $error_text = undef)
         eval
         {
             $result = 1 if ($value =~ m/$arg/);
-        };
-        if ($@)
+            1;
+        }
+        or do
         {
             my $err = $@;
             $err =~ s/ at .+ line \d+\..*//gs;
             throw($err);
-        }
+        };
     }
     else
     {
@@ -356,14 +299,7 @@ sub match_syntax_value($syntax, $value, $error_text = undef)
 #
 #   Routine      - amount_to_units
 #
-#   Description  - Converts the given amount into units.
-#
-#   Data         - $value       : The amount that is to be converted into
-#                                 units.
-#                  $want_bits   : True if the amount is a data size and should
-#                                 be returned as bits and not bytes. This is
-#                                 optional and defaults to false.
-#                  Return Value : The units.
+#   Description  - Public routine. See the POD section for further details.
 #
 ##############################################################################
 
@@ -409,11 +345,7 @@ sub amount_to_units($value, $want_bits = 0)
 #
 #   Routine      - duration_to_seconds
 #
-#   Description  - Converts the given time duration into seconds.
-#
-#   Data         - $duration    : The time duration that is to be converted
-#                                 into seconds.
-#                  Return Value : The duration in seconds.
+#   Description  - Public routine. See the POD section for further details.
 #
 ##############################################################################
 
@@ -449,11 +381,7 @@ sub duration_to_seconds($duration)
 #
 #   Routine      - register_syntax_regex
 #
-#   Description  - Register the specified syntax element and pattern.
-#
-#   Data         - $name        : The name that is to be given to the syntax
-#                                 element.
-#                  $regex       : The regex specified as a regular string.
+#   Description  - Public routine. See the POD section for further details.
 #
 ##############################################################################
 
@@ -481,12 +409,65 @@ sub register_syntax_regex($name, $regex)
     eval
     {
         $syntax_regexes{$name} = qr/$regex/;
-    };
-    if ($@)
+        1;
+    }
+    or do
     {
         my $err = $@;
         $err =~ s/ at .+ line \d+\..*//gs;
         throw($err);
+    };
+
+    return;
+
+}
+#
+##############################################################################
+#
+#   Routine      - verify_node
+#
+#   Description  - Checks the specified structure making sure that the domain
+#                  specific syntax is ok.
+#
+#   Data         - $data   : A reference to the data item within the record
+#                            that is to be checked. This is either a reference
+#                            to an array or a hash as scalars are leaf nodes
+#                            and processed inline.
+#                  $syntax : A reference to that part of the syntax tree that
+#                            is going to be used to check the data referenced
+#                            by $data.
+#                  $path   : A string containing the current path through the
+#                            record for the current item in $data.
+#                  $status : A reference to a string that is to contain a
+#                            description of what is wrong. If everything is ok
+#                            then this string will be empty.
+#
+##############################################################################
+
+
+
+sub verify_node($data, $syntax, $path, $status)
+{
+
+    # Check arrays, these are not only lists but also branch points.
+
+    if (ref($data) eq 'ARRAY' and ref($syntax) eq 'ARRAY')
+    {
+        verify_arrays($data, $syntax, $path, $status);
+    }
+
+    # Check records.
+
+    elsif (ref($data) eq 'HASH' and ref($syntax) eq 'HASH')
+    {
+        verify_hashes($data, $syntax, $path, $status);
+    }
+
+    # We should never see any other types as scalars are dealt with on the spot.
+
+    else
+    {
+        throw('Settings syntax parser, internal state error detected.');
     }
 
     return;
@@ -577,10 +558,10 @@ sub verify_arrays($data, $syntax, $path, $status)
                            $i)
                         if ($debug);
                     $local_status = '';
-                    verify($data->[$i],
-                           $syntax->[$j],
-                           $path . '->[' . $i . ']',
-                           \$local_status);
+                    verify_node($data->[$i],
+                                $syntax->[$j],
+                                $path . '->[' . $i . ']',
+                                \$local_status);
                     next array_element if ($local_status eq '');
                 }
             }
@@ -632,10 +613,10 @@ sub verify_arrays($data, $syntax, $path, $status)
                                join('|', keys(%$syn_el)),
                                $type_key)
                             if ($debug);
-                        verify($data->[$i],
-                               $syn_el,
-                               $path . '->[' . $i . ']',
-                               $status);
+                        verify_node($data->[$i],
+                                    $syn_el,
+                                    $path . '->[' . $i . ']',
+                                    $status);
                         next array_element;
                     }
                 }
@@ -686,10 +667,10 @@ sub verify_arrays($data, $syntax, $path, $status)
                                    join('|', keys(%$syn_el)))
                                 if ($debug);
                             $local_status = '';
-                            verify($data->[$i],
-                                   $syn_el,
-                                   $path . '->[' . $i . ']',
-                                   \$local_status);
+                            verify_node($data->[$i],
+                                        $syn_el,
+                                        $path . '->[' . $i . ']',
+                                        \$local_status);
                             if ($local_status eq '')
                             {
                                 next array_element;
@@ -856,10 +837,10 @@ sub verify_hashes($data, $syntax, $path, $status)
                or (ref($syn_el) eq 'HASH'
                    and ref($data->{$field}) eq 'HASH'))
         {
-            verify($data->{$field},
-                   $syn_el,
-                   $path . '->' . $field,
-                   $status);
+            verify_node($data->{$field},
+                        $syn_el,
+                        $path . '->' . $field,
+                        $status);
         }
         elsif (ref($syn_el) eq '')
         {
@@ -966,10 +947,10 @@ sub generate_regexes()
 #
 ##############################################################################
 
+
+
 generate_regexes();
 1;
-
-__END__
 #
 ##############################################################################
 #
@@ -978,6 +959,8 @@ __END__
 ##############################################################################
 
 
+
+__END__
 
 =pod
 
@@ -1015,8 +998,7 @@ Config::Verifier - Verify the structure and values inside Perl data structures
             's:system_users_cache_file' => 'R:path',
             's:use_syslog'              => 'R:boolean'});
   my $data = YAML::XS::LoadFile("my-config.yml");
-  my $status = "";
-  verify($data, \%settings_syntax_tree, "settings", \$status);
+  my $status = verify($data, \%settings_syntax_tree, "settings");
   die("Syntax error detected. The reason given was:\n" . $status)
       if ($status ne "");
 
@@ -1046,22 +1028,17 @@ supports ini style configuration files, is L<Config::Validator>.
 
 =over 4
 
-=item B<verify(\%data, \%syntax, $path, \$status)>
+=item B<verify($data, $syntax, $name)>
 
 Checks the specified structure making sure that the domain specific syntax is
 ok.
 
-C<\%data> is a reference to the data structure that is to be checked, typically
-a hash, i.e. a record, but it can also be an array. C<\%syntax> is a reference
+C<$data> is a reference to the data structure that is to be checked, typically
+a hash, i.e. a record, but it can also be an array. C<$syntax> is a reference
 to a syntax tree that describes what data should be present and its basic
-format, including numeric ranges for numbers. C<$path> is a string containing a
+format, including numeric ranges for numbers. C<$name> is a string containing a
 descriptive name for the data structure being checked. This will be used as the
-base name in any error messages returned by this function. Lastly C<$status> is
-a reference to a string that is to contain any error message resulting from
-parsing the data. C<$status> should always be initialised to an empty string.
-Upon return if there's a problem with the data structure then the details will
-be contained within C<$status>, otherwise it will be an empty string if
-everything is ok.
+base name in any error messages returned by this function.
 
 =item B<amount_to_units($amount)[, $want_bits]>
 
@@ -1110,11 +1087,20 @@ one of true, yes, Y, y, or on for true and false, no N, n, off or '' for false.
 
 =head1 RETURN VALUES
 
-C<verify()> returns nothing. C<amount_to_units()> returns an integer. C<debug()>
-returns the previous debug message setting as a boolean.
+C<verify()> returns a string containing the details of the problems encountered
+when parsing the data on failure, otherwise an empty string on success.
+
+C<amount_to_units()> returns an integer.
+
+C<debug()> returns the previous debug message setting as a boolean.
+
 C<duration_to_seconds()> returns the number of seconds that the specified
-duration represents.  C<match_syntax_value()> returns true for a match,
-otherwise false for no match. C<register_syntax_regex()> returns nothing. Lastly
+duration represents.
+
+C<match_syntax_value()> returns true for a match, otherwise false for no match.
+
+C<register_syntax_regex()> returns nothing.
+
 C<string_to_boolean()> returns a boolean.
 
 =head1 NOTES
