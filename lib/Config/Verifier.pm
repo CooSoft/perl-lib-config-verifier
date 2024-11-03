@@ -39,6 +39,12 @@ use IO::Handle;
 
 # ***** GLOBAL DATA DECLARATIONS *****
 
+# Constants representing the state of hashes in a syntax array.
+
+use constant ONE_HASH            => 0x01;
+use constant SINGLE_FIELD_HASHES => 0x02;
+use constant TYPED_FIELD_HASHES  => 0x04;
+
 # Constants for assorted messages.
 
 use constant SCHEMA_ERROR => 'Illegal syntax element found in syntax tree ';
@@ -97,12 +103,16 @@ my %syntax_regexes =
 
 # Private routines.
 
+state sub check_hashes_in_array;
 state sub generate_regexes;
 state sub logger($format, @args)
 {
     STDERR->printf($format . "\n", @args);
     return;
 }
+state sub take_single_field_hashes_path;
+state sub take_singular_hash_path;
+state sub take_typed_hashes_path;
 state sub throw($format, @args)
 {
     croak(sprintf($format, @args));
@@ -583,123 +593,70 @@ sub verify_arrays($data, $syntax, $path, $status)
         }
 
         # We are comparing hashes, records, so look to see if there is a common
-        # field in one of the hashes. If so then take that branch.
+        # field in one of the syntax hashes. If so then take that branch.
 
         elsif (ref($data->[$i]) eq 'HASH')
         {
 
-            # We may need to backtrack, so use a local status string and then
-            # only report anything wrong if we don't find a match at all.
+            # First determine what type of hashes we have in the syntax array
+            # (just one or multiple that are typed in some way).
 
-            # First look for a special matching type field and value. This will
-            # give an exact match if set up correctly.
+            my $hash_state = check_hashes_in_array($syntax);
 
-            foreach my $type_key (keys(%{$data->[$i]}))
+            # If there is one hash in the syntax array then that's our path.
+
+            if ($hash_state == ONE_HASH)
             {
-                my $syn_key = 't:' . $type_key;
-                my $type_value = $data->[$i]->{$type_key};
-                foreach my $syn_el (@$syntax)
+                take_singular_hash_path($data, $syntax, $path, $status, $i);
+                next array_element;
+            }
+
+            # With multiple hashes in a syntax array we only allow typed hashes.
+
+            # If the data hash only has one field then treat that field as the
+            # implicitly typed field.
+
+            if (keys(%{$data->[$i]}) == 1)
+            {
+                if ($hash_state | SINGLE_FIELD_HASHES)
                 {
-                    if (ref($syn_el) eq 'HASH'
-                        and exists($syn_el->{'t:' . $type_key})
-                        and match_syntax_value($syn_el->{'t:' . $type_key},
-                                               $type_value))
+                    if (take_single_field_hashes_path($data,
+                                                      $syntax,
+                                                      $path,
+                                                      $status,
+                                                      $i))
                     {
-                        logger("Comparing `%s->[%u]:%s' against `%s' based on "
-                                   . "type field `%s'.",
-                               $path,
-                               $i,
-                               join('|', keys(%{$data->[$i]})),
-                               join('|', keys(%$syn_el)),
-                               $type_key)
-                            if ($debug);
-                        verify_node($data->[$i],
-                                    $syn_el,
-                                    $path . '->[' . $i . ']',
-                                    $status);
                         next array_element;
                     }
                 }
+                $$status .= sprintf('Unexpected single type field record with '
+                                        . 'a type name of `%s\' found at '
+                                        . "%s->[%u].\n",
+                            (keys(%{$data->[$i]}))[0],
+                            $path,
+                            $i);
             }
 
-            # Ok that didn't work so check to see if there is only one field in
-            # the hash (typically a record type field). If no single key hashes
-            # exist then abort, the schema has to change.
+            # We have multiple fields in the data hash so one of them must be
+            # explicitly typed with `t:'.
 
-            if (keys(%{$data->[$i]}) != 1)
-            {
-                $$status .= sprintf('Untyped multifield records are not '
-                                        . "allowed at %s->[%u].\n",
-                                    $path,
-                                    $i);
-            }
             else
             {
-
-                my $data_field = (keys(%{$data->[$i]}))[0];
-                my $local_status = '';
-                foreach my $syn_el (@$syntax)
+                if ($hash_state | TYPED_FIELD_HASHES)
                 {
-                    if (ref($syn_el) eq 'HASH')
+                    if (take_typed_hashes_path($data,
+                                               $syntax,
+                                               $path,
+                                               $status,
+                                               $i))
                     {
-
-                        # Don't allow non-typed records.
-
-                        throw('%s(untyped records are not allowed).',
-                              SCHEMA_ERROR)
-                            unless (keys(%$syn_el) == 1);
-
-                        # Only allow field names that are either constant or
-                        # some sort of value. If there are duplicate values then
-                        # too bad as the first match will be taken.
-
-                        my $syn_field = (keys(%$syn_el))[0];
-                        throw("%s(record type fields cannot be of type `c:').",
-                              SCHEMA_ERROR)
-                            if ($syn_field eq 'c:');
-
-                        if (match_syntax_value($syn_field, $data_field))
-                        {
-                            logger("Comparing `%s->[%u]:%s' against `%s'.",
-                                   $path,
-                                   $i,
-                                   join('|', keys(%{$data->[$i]})),
-                                   join('|', keys(%$syn_el)))
-                                if ($debug);
-                            $local_status = '';
-                            verify_node($data->[$i],
-                                        $syn_el,
-                                        $path . '->[' . $i . ']',
-                                        \$local_status);
-                            if ($local_status eq '')
-                            {
-                                next array_element;
-                            }
-                            else
-                            {
-                                last;
-                            }
-                        }
-
+                        next array_element;
                     }
                 }
-
-                # Only report an error once for each route taken through the
-                # syntax tree.
-
-                if ($local_status eq '')
-                {
-                    $$status .= sprintf('Unexpected typed record with field '
-                                            . "`%s' found at %s->[%u].\n",
-                                        $data_field,
-                                        $path,
-                                        $i);
-                }
-                else
-                {
-                    $$status .= $local_status;
-                }
-
+                $$status .= sprintf('Unexpected untyped multi-field record '
+                                        . "found at %s->[%u].\n",
+                                    $path,
+                                    $i);
             }
 
         }
@@ -859,6 +816,248 @@ sub verify_hashes($data, $syntax, $path, $status)
                                 $path . '->' . $field);
         }
 
+    }
+
+    return;
+
+}
+#
+##############################################################################
+#
+#   Routine      - check_hashes_in_array
+#
+#   Description  - Checks the specified syntax array checking that the hashes
+#                  must be typed in some way if more than one hash is present.
+#
+#   Data         - $syntax      : A reference to that part of the syntax tree
+#                                 that is going to be checked.
+#                  Return Value : A bit mask with bits set according to what
+#                                was found.
+#
+##############################################################################
+
+
+
+sub check_hashes_in_array($syntax)
+{
+
+    my $nr_hashes = 0;
+    my $single_typed_field_hashes;
+    my $typed_field_hashes;
+    my $untyped_field_hashes;
+
+    foreach my $syn_el (@$syntax)
+    {
+        if (ref($syn_el) eq 'HASH')
+        {
+            ++ $nr_hashes;
+            if (keys(%$syn_el) == 1)
+            {
+                $single_typed_field_hashes = 1;
+
+                # Custom fields can't be matched against as they are undefined.
+
+                throw('%s(record type fields cannot be of type `c:\').',
+                      SCHEMA_ERROR)
+                    if ((keys(%$syn_el))[0] eq 'c:');
+            }
+            else
+            {
+                my $nr_typed_keys = 0;
+                my $typed;
+                foreach my $syn_key (keys(%$syn_el))
+                {
+                    if ($syn_key =~ m/^t:/)
+                    {
+                        $typed = 1;
+                        $typed_field_hashes = 1;
+                        ++ $nr_typed_keys;
+                        throw('%s(only one typed field can the present in a '
+                                  . 'record).',
+                              SCHEMA_ERROR)
+                            if ($nr_typed_keys > 1);
+                    }
+                }
+                $untyped_field_hashes = 1 unless ($typed);
+            }
+        }
+    }
+
+    if ($nr_hashes == 1)
+    {
+        return ONE_HASH;
+    }
+    throw('%s(untyped records must be the only record in a list).',
+          SCHEMA_ERROR)
+        if ($untyped_field_hashes);
+    my $state = 0;
+    $state |= SINGLE_FIELD_HASHES if ($single_typed_field_hashes);
+    $state |= TYPED_FIELD_HASHES if ($typed_field_hashes);
+
+    return $state;
+
+}
+#
+##############################################################################
+#
+#   Routine      - take_singular_hash_path
+#
+#   Description  - Checks the specified syntax array looking for a singular
+#                  hash and then takes that path.
+#
+#   Data         - $data   : A reference to the array data item within the
+#                            record that is to be checked.
+#                  $syntax : A reference to that part of the syntax tree that
+#                            is going to be used to check the data referenced
+#                            by $data.
+#                  $path   : A string containing the current path through the
+#                            record for the current item in $data.
+#                  $status : A reference to a string that is to contain a
+#                            description of what is wrong. If everything is ok
+#                            then this string will be empty.
+#                  $i      : The current index in the data array.
+#
+##############################################################################
+
+
+
+sub take_singular_hash_path($data, $syntax, $path, $status, $i)
+{
+
+    foreach my $syn_el (@$syntax)
+    {
+        if (ref($syn_el) eq 'HASH')
+        {
+            logger("Comparing `%s->[%u]:%s' against `%s'.",
+                   $path,
+                   $i,
+                   join('|', keys(%{$data->[$i]})),
+                   join('|', keys(%$syn_el)))
+                if ($debug);
+            verify_node($data->[$i],
+                        $syn_el,
+                        $path . '->[' . $i . ']',
+                        $status);
+            return;
+        }
+    }
+
+    return;
+
+}
+#
+##############################################################################
+#
+#   Routine      - take_typed_hashes_path
+#
+#   Description  - Checks the specified syntax array checking for only hashes
+#                  that contain special typed fields and then takes the path
+#                  of a matching hash.
+#
+#   Data         - $data        : A reference to the array data item within
+#                                 the record that is to be checked.
+#                  $syntax      : A reference to that part of the syntax tree
+#                                 that is going to be used to check the data
+#                                 referenced by $data.
+#                  $path        : A string containing the current path through
+#                                 the record for the current item in $data.
+#                  $status      : A reference to a string that is to contain a
+#                                 description of what is wrong. If everything
+#                                 is ok then this string will be empty.
+#                  Return Value : True if a path was taken, otherwise false if
+#                                 not.
+#
+##############################################################################
+
+
+
+sub take_typed_hashes_path($data, $syntax, $path, $status, $i)
+{
+
+    # Look for a special matching type field and value. This will give an exact
+    # match if set up correctly.
+
+    foreach my $data_key (keys(%{$data->[$i]}))
+    {
+        my $syn_key = 't:' . $data_key;
+        foreach my $syn_el (@$syntax)
+        {
+            if (ref($syn_el) eq 'HASH'
+                and exists($syn_el->{'t:' . $data_key})
+                and match_syntax_value($syn_el->{'t:' . $data_key},
+                                       $data->[$i]->{$data_key}))
+            {
+                logger('Comparing `%s->[%u]:%s\' against `%s\' based on type '
+                           . 'field `%s\'.',
+                       $path,
+                       $i,
+                       join('|', keys(%{$data->[$i]})),
+                       join('|', keys(%$syn_el)),
+                       $data_key)
+                    if ($debug);
+                verify_node($data->[$i],
+                            $syn_el,
+                            $path . '->[' . $i . ']',
+                            $status);
+                return 1;
+            }
+        }
+    }
+
+    return;
+
+}
+#
+##############################################################################
+#
+#   Routine      - take_single_field_hashes_path
+#
+#   Description -  Checks the specified syntax array checking for hashes that
+#                  contain only one field and then takes the path of a
+#                  matching hash.
+#
+#   Data         - $data        : A reference to the array data item within
+#                                 the record that is to be checked.
+#                  $syntax      : A reference to that part of the syntax tree
+#                                 that is going to be used to check the data
+#                                 referenced by $data.
+#                  $path        : A string containing the current path through
+#                                 the record for the current item in $data.
+#                  $status      : A reference to a string that is to contain a
+#                                 description of what is wrong. If everything
+#                                 is ok then this string will be empty.
+#                  Return Value : True if a path was taken, otherwise false if
+#                                 not.
+#
+##############################################################################
+
+
+
+sub take_single_field_hashes_path($data, $syntax, $path, $status, $i)
+{
+
+    my $data_key = (keys(%{$data->[$i]}))[0];
+    foreach my $syn_el (@$syntax)
+    {
+        if (ref($syn_el) eq 'HASH' and keys(%$syn_el) == 1)
+        {
+            my $syn_key = (keys(%$syn_el))[0];
+            if (match_syntax_value($syn_key, $data_key))
+            {
+                logger('Comparing `%s->[%u]:%s\' against `%s\'.',
+                       $path,
+                       $i,
+                       $data_key,
+                       $syn_key)
+                    if ($debug);
+                verify_node($data->[$i],
+                            $syn_el,
+                            $path . '->[' . $i . ']',
+                            $status);
+                return 1;
+            }
+
+        }
     }
 
     return;
