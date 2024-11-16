@@ -23,3 +23,5 @@ allow_if_string_contains_single_quote = 1
 [-ValuesAndExpressions::ProhibitEmptyQuotes]
 [-ValuesAndExpressions::ProhibitMagicNumbers]
 [-ValuesAndExpressions::ProhibitNoisyQuotes]
+[-Variables::ProhibitPunctuationVars]
+[-Variables::RequireInitializationForLocalVars]

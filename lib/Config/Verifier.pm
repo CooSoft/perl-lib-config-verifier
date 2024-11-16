@@ -36,6 +36,8 @@ use warnings;
 
 use Carp;
 use IO::Handle;
+use List::Util qw(any);
+use POSIX qw(:limits_h);
 
 # ***** GLOBAL DATA DECLARATIONS *****
 
@@ -49,18 +51,23 @@ use constant TYPED_FIELD_HASHES  => 0x04;
 
 use constant SCHEMA_ERROR => 'Illegal syntax element found in syntax tree ';
 
+# Structures for managing private objects.
+
+my $Class_Name = __PACKAGE__;
+my %Class_Objects;
+
 # Whether debug messages should be logged or not.
 
-my $debug = 0;
+my $Debug = 0;
 
 # Lookup hashes for converting assorted measures.
 
-my %duration_in_seconds = ('s' => 1,
+my %Duration_In_Seconds = ('s' => 1,
                            'm' => 60,
                            'h' => 3_600,
                            'd' => 86_400,
                            'w' => 604_800);
-my %amounts = ('B'   => 1,
+my %Amounts = ('B'   => 1,
                'K'   => 1_000,
                'M'   => 1_000_000,
                'G'   => 1_000_000_000,
@@ -76,10 +83,10 @@ my %amounts = ('B'   => 1,
 
 # A lookup hash containing regexes in the form or plain strings that will get
 # replaced by their compiled counterparts, whilst having their non-capturing
-# counterparts added to the %syntac_regexes hash below. This reduces maintenance
+# counterparts added to the %Syntax_Regexes hash below. This reduces maintenance
 # and mistakes.
 
-my %capturing_regexes = (amount      => '^([-+]?\d+(?:\.\d+)?)([KMGT])?$',
+my %Capturing_Regexes = (amount      => '^([-+]?\d+(?:\.\d+)?)([KMGT])?$',
                          amount_data => '^(\d+)((?:[KMGT]i?)?[Bb])$',
                          duration    => '^(\d+)(ms|[smhdw])$');
 
@@ -87,7 +94,7 @@ my %capturing_regexes = (amount      => '^([-+]?\d+(?:\.\d+)?)([KMGT])?$',
 # the end matches nothing, i.e. '' and undef should go to false. The more
 # complex regexes are generated at load time.
 
-my %syntax_regexes =
+my %Syntax_Regexes =
     (anything              => qr/^.+$/,
      boolean               => qr/^(?:true|yes|[Yy]|on|1|
                                      false|no|[Nn]|off|0|(?!.))$/x,
@@ -104,12 +111,14 @@ my %syntax_regexes =
 # Private routines.
 
 state sub check_hashes_in_array;
+state sub check_syntax_tree;
 state sub generate_regexes;
 state sub logger($format, @args)
 {
     STDERR->printf($format . "\n", @args);
     return;
 }
+state sub match_syntax;
 state sub take_single_field_hashes_path;
 state sub take_singular_hash_path;
 state sub take_typed_hashes_path;
@@ -121,47 +130,62 @@ state sub verify_arrays;
 state sub verify_hashes;
 state sub verify_node;
 
-# Public routines.
+# Constructor and destructor.
+
+sub new;
+sub DESTROY;
+
+# Public instance methods.
+
+sub check($self, $data, $name)
+{
+    my $this = $Class_Objects{$self->{$Class_Name}};
+    my $status = '';
+    verify_node($this, $data, $this->{syntax_tree}, $name, \$status);
+    return $status;
+}
+sub match_syntax_value($self, $syntax, $value, $error_text = undef)
+{
+    my $this = $Class_Objects{$self->{$Class_Name}};
+    return match_syntax($this, $syntax, $value, $error_text);
+}
+sub syntax_tree($self, $syntax_tree)
+{
+    my $this = $Class_Objects{$self->{$Class_Name}};
+    check_syntax_tree($this, $syntax_tree);
+    $this->{syntax_tree} = $syntax_tree;
+    return;
+}
+
+# Public instance and class methods.
+
+sub register_syntax_regex;
+
+# Public class methods.
 
 sub amount_to_units;
-sub debug($value = undef)
+sub debug($, $value = undef)
 {
-    $debug = $value if (defined($value));
-    return $debug;
+    $Debug = $value if (defined($value));
+    return $Debug;
 }
 sub duration_to_seconds;
-sub match_syntax_value;
-sub register_syntax_regex;
-sub string_to_boolean($value)
+sub string_to_boolean($, $value)
 {
     return ($value =~ m/^(?:true|yes|[Yy]|on|1)$/) ? 1 : 0;
-}
-sub verify($data, $syntax, $name)
-{
-    my $status = '';
-    verify_node($data, $syntax, $name, \$status);
-    return $status;
 }
 
 # ***** PACKAGE INFORMATION *****
 
-# We are just a procedural module that exports stuff.
+# We are just a base class with nothing additional to export.
 
-use base qw(Exporter);
+use parent qw(Exporter);
 
-our %EXPORT_TAGS = (common_routines => [qw(amount_to_units
-                                           duration_to_seconds
-                                           match_syntax_value
-                                           register_syntax_regex
-                                           string_to_boolean
-                                           verify)]);
-our @EXPORT_OK = qw(debug);
-Exporter::export_ok_tags(qw(common_routines));
 our $VERSION = '1.0';
 #
 ##############################################################################
 #
-#   Routine      - match_syntax_value
+#   Routine      - new
 #
 #   Description  - Public routine. See the POD section for further details.
 #
@@ -169,139 +193,69 @@ our $VERSION = '1.0';
 
 
 
-sub match_syntax_value($syntax, $value, $error_text = undef)
+sub new($class, $syntax_tree = {})
 {
 
-    # We don't allow undefined values.
+    my ($self,
+        $this);
+    state $last_id = 0;
 
-    return unless(defined($value));
+    # Actually construct the internal object, copying the compiled syntax regex
+    # table across.
 
-    my ($arg,
-        $result,
-        $type);
+    my %sregexes_copy = %Syntax_Regexes;
+    $this = {syntax_tree    => $syntax_tree,
+             syntax_regexes => \%sregexes_copy};
 
-    # Decide what to do based upon the header.
+    # Now we have an initialised internal object, check the specified syntax
+    # tree for errors.
 
-    if ($syntax =~ m/^([cfimRrst]):(.*)/)
-    {
-        $type = $1;
-        $arg = $2;
-    }
-    else
-    {
-        throw("%s(syntax = `%s').", SCHEMA_ERROR, $syntax);
-    }
-    if ($type eq 'c')
-    {
-        $result = 1;
-    }
-    elsif ($type eq 'f')
-    {
-        my $float_re = '[-+]?(?=\d|\.\d)\d*(?:\.\d*)?(?:[Ee][-+]?\d+)?';
-        if ($arg =~ m/^(?:($float_re))?(?:,($float_re))?$/)
-        {
-            my ($min, $max) = ($1, $2);
-            throw("%s(syntax = `%s', minimum is greater than maximum).",
-                  SCHEMA_ERROR,
-                  $syntax)
-                if (defined($min) and defined($max) and $min  > $max);
-            if ($value =~ m/^$float_re$/
-                and (not defined($min) or $value >= $min)
-                and (not defined($max) or $value <= $max))
-            {
-                $result = 1;
-            }
-            elsif (defined($error_text))
-            {
-                $$error_text =
-                    sprintf('float between %s and %s',
-                            defined($min) ? $min : '<No Lower Limit>',
-                            defined($max) ? $max : '<No Upper Limit>');
-            }
-        }
-        else
-        {
-            throw("%s(syntax = `%s').", SCHEMA_ERROR, $syntax);
-        }
-    }
-    elsif ($type eq 'i')
-    {
-        my $int_re = '[-+]?\d+';
-        if ($arg =~ m/^(?:($int_re))?(?:,($int_re)?)?(?:,($int_re)?)?$/)
-        {
-            my ($min, $max, $step) = ($1, $2, $3);
-            throw("%s(syntax = `%s', minimum is greater than maximum).",
-                  SCHEMA_ERROR,
-                  $syntax)
-                if (defined($min) and defined($max) and $min  > $max);
-            throw("%s(syntax = `%s', minimum/maximum values are not "
-                      . 'compatible with step value).',
-                  SCHEMA_ERROR,
-                  $syntax)
-                if (defined($step)
-                    and ((defined($min) and ($min % $step) != 0)
-                         or (defined($max) and ($max % $step) != 0)));
-            if ($value =~ m/^$int_re$/
-                and (not defined($min) or $value >= $min)
-                and (not defined($max) or $value <= $max)
-                and (not defined($step) or ($value % $step) == 0))
-            {
-                $result = 1;
-            }
-            elsif (defined($error_text))
-            {
-                $$error_text =
-                    sprintf('integer between %s and %s%s',
-                            defined($min) ? $min : '<No Lower Limit>',
-                            defined($max) ? $max : '<No Upper Limit>',
-                            defined($step) ? " with a step size of $step" : '');
-            }
-        }
-        else
-        {
-            throw("%s(syntax = `%s').", SCHEMA_ERROR, $syntax);
-        }
-    }
-    elsif ($type eq 'R')
-    {
-        if (exists($syntax_regexes{$arg}))
-        {
-            $result = 1 if ($value =~ m/$syntax_regexes{$arg}/);
-        }
-        else
-        {
-            throw("%s(syntax = `%s', unknown syntactic regular expression).",
-                  SCHEMA_ERROR,
-                  $syntax);
-        }
-    }
-    elsif ($type eq 'r')
-    {
-        local $@;
-        eval
-        {
-            $result = 1 if ($value =~ m/$arg/);
-            1;
-        }
-        or do
-        {
-            my $err = $@;
-            $err =~ s/ at .+ line \d+\..*//gs;
-            throw($err);
-        };
-    }
-    else
-    {
-        $result = 1 if ($arg eq $value);
-    }
+    check_syntax_tree($this, $syntax_tree);
 
-    logger("Comparing `%s' against `%s'. Match: %s.",
-           $syntax,
-           $value,
-           ($result) ? 'Yes' : 'No')
-        if ($debug);
+    # Create a unique key (with duplication detection) and the actual object,
+    # then store this unique key in the object in a field named after this
+    # class.
 
-    return $result;
+    for (my $i = 0;
+         exists($Class_Objects{$last_id});
+         ++ $i, $last_id = ++ $last_id & 0xffff)
+    {
+        throw('Exhausted unique object keys') if ($i == 0xffff);
+    }
+    $self = bless({}, $class);
+    $self->{$Class_Name} = $last_id;
+
+    # Now file the object's record in the records store, filed under the
+    # object's unique key.
+
+    $Class_Objects{$last_id} = $this;
+
+    return $self;
+
+}
+#
+##############################################################################
+#
+#   Routine      - DESTROY
+#
+#   Description  - Class destructor.
+#
+#   Data         - $self : The object.
+#
+##############################################################################
+
+
+
+sub DESTROY($self)
+{
+
+    local $@;
+    eval
+    {
+        delete($Class_Objects{$self->{$Class_Name}});
+    };
+
+    return;
 
 }
 #
@@ -315,18 +269,18 @@ sub match_syntax_value($syntax, $value, $error_text = undef)
 
 
 
-sub amount_to_units($value, $want_bits = 0)
+sub amount_to_units($, $value, $want_bits = 0)
 {
 
     my $units = 0;
 
-    if ((not $want_bits and $value =~ m/$capturing_regexes{amount}/)
-        or $value =~ m/$capturing_regexes{amount_data}/)
+    if ((not $want_bits and $value =~ m/$Capturing_Regexes{amount}/)
+        or $value =~ m/$Capturing_Regexes{amount_data}/)
     {
         my ($amount, $unit) = ($1, $2);
         if (defined($unit))
         {
-            $units = $amount * $amounts{($unit =~ s/b/B/gr)};
+            $units = $amount * $Amounts{($unit =~ s/b/B/gr)};
             my $given_as_bits = ($unit =~ m/.*b$/) ? 1 : 0;
             if (not $given_as_bits and $want_bits)
             {
@@ -344,7 +298,7 @@ sub amount_to_units($value, $want_bits = 0)
     }
     else
     {
-        throw("Invalid amount `%s' detected.", $value);
+        throw('Invalid amount `%s\' detected.', $value);
     }
 
     return $units;
@@ -361,12 +315,12 @@ sub amount_to_units($value, $want_bits = 0)
 
 
 
-sub duration_to_seconds($duration)
+sub duration_to_seconds($, $duration)
 {
 
     my $seconds = 0;
 
-    if ($duration =~ m/$capturing_regexes{duration}/)
+    if ($duration =~ m/$Capturing_Regexes{duration}/)
     {
         my ($amount, $unit) = ($1, $2);
         if ($unit eq 'ms')
@@ -375,12 +329,12 @@ sub duration_to_seconds($duration)
         }
         else
         {
-            $seconds = $amount * $duration_in_seconds{$unit};
+            $seconds = $amount * $Duration_In_Seconds{$unit};
         }
     }
     else
     {
-        throw("Invalid duration `%s' detected.", $duration);
+        throw('Invalid duration `%s\' detected.', $duration);
     }
 
     return $seconds;
@@ -397,20 +351,30 @@ sub duration_to_seconds($duration)
 
 
 
-sub register_syntax_regex($name, $regex)
+sub register_syntax_regex($self, $name, $regex)
 {
+
+    my $regex_table;
+
+    if (ref($self) eq '')
+    {
+        $regex_table = \%Syntax_Regexes;
+    }
+    else
+    {
+        $regex_table = $Class_Objects{$self->{$Class_Name}}->{syntax_regexes};
+    }
 
     # The name must be a simple variable like name and the regex pattern must be
     # properly anchored.
 
-    throw("`%s' is not a suitable syntax element name.", $name)
+    throw('`%s\' is not a suitable syntax element name.', $name)
         if ($name !~ m/^[-[:alnum:]_.]+$/);
-    throw("`%s' is not anchored to the start and end of the string.", $regex)
+    throw('`%s\' is not anchored to the start and end of the string.', $regex)
         if ($regex !~ m/^\^.*\$$/);
-    if (exists($capturing_regexes{$name}))
+    if (exists($Capturing_Regexes{$name}))
     {
-        throw("Changing `%s' is not allowed as this could break related code.",
-              $name);
+        throw('Changing `%s\' is not permitted.', $name);
     }
 
     # Register it.
@@ -418,7 +382,7 @@ sub register_syntax_regex($name, $regex)
     local $@;
     eval
     {
-        $syntax_regexes{$name} = qr/$regex/;
+        $regex_table->{$name} = qr/$regex/;
         1;
     }
     or do
@@ -434,12 +398,85 @@ sub register_syntax_regex($name, $regex)
 #
 ##############################################################################
 #
+#   Routine      - check_syntax_tree
+#
+#   Description  - Checks the specified syntax tree making sure that it is
+#                  valid.
+#
+#   Data         - $this   : The internal private object.
+#                  $syntax : A reference to the syntax tree that is to be
+#                            checked.
+#
+##############################################################################
+
+
+
+sub check_syntax_tree($this, $syntax)
+{
+
+    # Check arrays, these are not only lists but also branch points.
+
+    my $type = ref($syntax);
+    if ($type eq 'ARRAY')
+    {
+
+        # Check for any hashes, records, making sure that if there are any that
+        # they are of the correct type (one unique record, single field or
+        # typed).
+
+        check_hashes_in_array($syntax);
+
+        # Scan through the array processing each type of entry.
+
+        foreach my $syn_el (@$syntax)
+        {
+            if (ref($syn_el) eq '')
+            {
+                logger('Checking syntax tree element `%s\'.', $syn_el)
+                    if ($Debug);
+                match_syntax($this, $syn_el);
+            }
+            else
+            {
+                check_syntax_tree($this, $syn_el)
+            }
+        }
+
+    }
+    elsif ($type eq 'HASH')
+    {
+        foreach my $key (keys(%$syntax))
+        {
+            my $value = $syntax->{$key};
+            match_syntax($this, $key);
+            if (ref($value) eq '')
+            {
+                match_syntax($this, $value);
+            }
+            else
+            {
+                check_syntax_tree($this, $value);
+            }
+        }
+    }
+    else
+    {
+        throw('Syntax tree has unsupported element of type `%s\'.', $type);
+    }
+
+    return;
+
+}
+#
+##############################################################################
+#
 #   Routine      - verify_node
 #
 #   Description  - Checks the specified structure making sure that the domain
 #                  specific syntax is ok.
 #
-#   Data         - $data   : A reference to the data item within the record
+#   Data         - $this   : The internal private object.
+#                  $data   : A reference to the data item within the record
 #                            that is to be checked. This is either a reference
 #                            to an array or a hash as scalars are leaf nodes
 #                            and processed inline.
@@ -456,21 +493,21 @@ sub register_syntax_regex($name, $regex)
 
 
 
-sub verify_node($data, $syntax, $path, $status)
+sub verify_node($this, $data, $syntax, $path, $status)
 {
 
     # Check arrays, these are not only lists but also branch points.
 
     if (ref($data) eq 'ARRAY' and ref($syntax) eq 'ARRAY')
     {
-        verify_arrays($data, $syntax, $path, $status);
+        verify_arrays($this, $data, $syntax, $path, $status);
     }
 
     # Check records.
 
     elsif (ref($data) eq 'HASH' and ref($syntax) eq 'HASH')
     {
-        verify_hashes($data, $syntax, $path, $status);
+        verify_hashes($this, $data, $syntax, $path, $status);
     }
 
     # We should never see any other types as scalars are dealt with on the spot.
@@ -491,7 +528,8 @@ sub verify_node($data, $syntax, $path, $status)
 #   Description  - Checks the specified structure making sure that the domain
 #                  specific syntax is ok.
 #
-#   Data         - $data   : A reference to the array data item within the
+#   Data         - $this   : The internal private object.
+#                  $data   : A reference to the array data item within the
 #                            record that is to be checked.
 #                  $syntax : A reference to that part of the syntax tree that
 #                            is going to be used to check the data referenced
@@ -506,7 +544,7 @@ sub verify_node($data, $syntax, $path, $status)
 
 
 
-sub verify_arrays($data, $syntax, $path, $status)
+sub verify_arrays($this, $data, $syntax, $path, $status)
 {
 
     # Scan through the array looking for a match based upon scalar values and
@@ -524,22 +562,22 @@ sub verify_arrays($data, $syntax, $path, $status)
             {
                 if (ref($syn_el) eq '')
                 {
-                    logger("Comparing `%s->[%u]:%s' against `%s'.",
+                    logger('Comparing `%s->[%u]:%s\' against `%s\'.',
                            $path,
                            $i,
                            $data->[$i],
                            $syn_el)
-                        if ($debug);
+                        if ($Debug);
                     next array_element
-                        if (match_syntax_value($syn_el, $data->[$i], \$err));
+                        if (match_syntax($this, $syn_el, $data->[$i], \$err));
                 }
             }
             $$status .= sprintf('Unexpected %s found at %s->[%u]. It either '
-                                    . "doesn't match the expected value "
+                                    . 'doesn\'t match the expected value '
                                     . 'format%s, or a list or record was '
                                     . "expected instead.\n",
                                 defined($data->[$i])
-                                    ? 'value `' . $data->[$i] . "'"
+                                    ? 'value `' . $data->[$i] . '\''
                                     : 'undefined value',
                                 $path,
                                 $i,
@@ -563,12 +601,13 @@ sub verify_arrays($data, $syntax, $path, $status)
             {
                 if (ref($syntax->[$j]) eq 'ARRAY')
                 {
-                    logger("Comparing `%s->[%u]:(ARRAY)' against `(ARRAY)'.",
+                    logger('Comparing `%s->[%u]:(ARRAY)\' against `(ARRAY)\'.',
                            $path,
                            $i)
-                        if ($debug);
+                        if ($Debug);
                     $local_status = '';
-                    verify_node($data->[$i],
+                    verify_node($this,
+                                $data->[$i],
                                 $syntax->[$j],
                                 $path . '->[' . $i . ']',
                                 \$local_status);
@@ -607,7 +646,12 @@ sub verify_arrays($data, $syntax, $path, $status)
 
             if ($hash_state == ONE_HASH)
             {
-                take_singular_hash_path($data, $syntax, $path, $status, $i);
+                take_singular_hash_path($this,
+                                        $data,
+                                        $syntax,
+                                        $path,
+                                        $status,
+                                        $i);
                 next array_element;
             }
 
@@ -620,7 +664,8 @@ sub verify_arrays($data, $syntax, $path, $status)
             {
                 if ($hash_state | SINGLE_FIELD_HASHES)
                 {
-                    if (take_single_field_hashes_path($data,
+                    if (take_single_field_hashes_path($this,
+                                                      $data,
                                                       $syntax,
                                                       $path,
                                                       $status,
@@ -644,7 +689,8 @@ sub verify_arrays($data, $syntax, $path, $status)
             {
                 if ($hash_state | TYPED_FIELD_HASHES)
                 {
-                    if (take_typed_hashes_path($data,
+                    if (take_typed_hashes_path($this,
+                                               $data,
                                                $syntax,
                                                $path,
                                                $status,
@@ -682,7 +728,8 @@ sub verify_arrays($data, $syntax, $path, $status)
 #   Description  - Checks the specified structure making sure that the domain
 #                  specific syntax is ok.
 #
-#   Data         - $data   : A reference to the hash data item within the
+#   Data         - $this   : The internal private object.
+#                  $data   : A reference to the hash data item within the
 #                            record that is to be checked.
 #                  $syntax : A reference to that part of the syntax tree that
 #                            is going to be used to check the data referenced
@@ -697,10 +744,9 @@ sub verify_arrays($data, $syntax, $path, $status)
 
 
 
-sub verify_hashes($data, $syntax, $path, $status)
+sub verify_hashes($this, $data, $syntax, $path, $status)
 {
 
-    my $custom_fields = grep(/^c\:$/, keys(%$syntax));
     my (@mandatory_fields);
 
     # Check that all mandatory fields are present.
@@ -744,7 +790,7 @@ sub verify_hashes($data, $syntax, $path, $status)
         {
             foreach my $key (keys(%$syntax))
             {
-                if (match_syntax_value($key, $field))
+                if (match_syntax($this, $key, $field))
                 {
                     $syn_el = $syntax->{$key};
                     last;
@@ -761,56 +807,58 @@ sub verify_hashes($data, $syntax, $path, $status)
                                     . "`%s'.\n",
                                 $path,
                                 $field)
-                unless (grep(/^c\:$/, keys(%$syntax)));
+                unless (any(sub {/^c\:$/}, keys(%$syntax)));
             next hash_key;
         }
 
-        logger("Comparing `%s->%s:%s' against `%s'.",
+        my $syn_type = ref($syn_el);
+        my $field_type = ref($data->{$field});
+
+        logger('Comparing `%s->%s:%s\' against `%s\'.',
                $path,
                $field,
-               (ref($data->{$field}) eq '')
-                   ? $data->{$field} : '(' . ref($data->{$field}) . ')',
-               (ref($syn_el) eq '') ? $syn_el : '(' . ref($syn_el) . ')')
-            if ($debug);
+               ($field_type eq '') ? $data->{$field} : '(' . $field_type . ')',
+               ($syn_type eq '') ? $syn_el : '(' . $syn_type . ')')
+            if ($Debug);
 
         # Ok now check that the value is correct and process it.
 
-        if (ref($syn_el) eq '' and ref($data->{$field}) eq '')
+        if ($syn_type eq '' and $field_type eq '')
         {
             my $err = '';
-            if (not match_syntax_value($syn_el, $data->{$field}, \$err))
+            if (not match_syntax($this, $syn_el, $data->{$field}, \$err))
             {
-                $$status .= sprintf("Unexpected %s found at %s. It doesn't "
+                $$status .= sprintf('Unexpected %s found at %s. It doesn\'t '
                                         . 'match the expected value '
                                         . "format%s.\n",
                                     defined($data->{$field})
-                                        ? 'value `' . $data->{$field} . "'"
+                                        ? 'value `' . $data->{$field} . '\''
                                         : 'undefined value',
                                     $path . '->' . $field,
                                     ($err ne '') ? " ($err)" : '');
             }
         }
-        elsif ((ref($syn_el) eq 'ARRAY' and ref($data->{$field}) eq 'ARRAY')
-               or (ref($syn_el) eq 'HASH'
-                   and ref($data->{$field}) eq 'HASH'))
+        elsif (($syn_type eq 'ARRAY' and $field_type eq 'ARRAY')
+               or ($syn_type eq 'HASH' and $field_type eq 'HASH'))
         {
-            verify_node($data->{$field},
+            verify_node($this,
+                        $data->{$field},
                         $syn_el,
                         $path . '->' . $field,
                         $status);
         }
-        elsif (ref($syn_el) eq '')
+        elsif ($syn_type eq '')
         {
             $$status .= sprintf('The %s field does not contain a simple '
                                     . "value.\n",
                                 $path . '->' . $field);
         }
-        elsif (ref($syn_el) eq 'ARRAY')
+        elsif ($syn_type eq 'ARRAY')
         {
             $$status .= sprintf("The %s field is not an array.\n",
                                 $path . '->' . $field);
         }
-        elsif (ref($syn_el) eq 'HASH')
+        elsif ($syn_type eq 'HASH')
         {
             $$status .= sprintf("The %s field is not a record.\n",
                                 $path . '->' . $field);
@@ -832,7 +880,7 @@ sub verify_hashes($data, $syntax, $path, $status)
 #   Data         - $syntax      : A reference to that part of the syntax tree
 #                                 that is going to be checked.
 #                  Return Value : A bit mask with bits set according to what
-#                                was found.
+#                                 was found.
 #
 ##############################################################################
 
@@ -905,7 +953,8 @@ sub check_hashes_in_array($syntax)
 #   Description  - Checks the specified syntax array looking for a singular
 #                  hash and then takes that path.
 #
-#   Data         - $data   : A reference to the array data item within the
+#   Data         - $this   : The internal private object.
+#                  $data   : A reference to the array data item within the
 #                            record that is to be checked.
 #                  $syntax : A reference to that part of the syntax tree that
 #                            is going to be used to check the data referenced
@@ -921,20 +970,21 @@ sub check_hashes_in_array($syntax)
 
 
 
-sub take_singular_hash_path($data, $syntax, $path, $status, $i)
+sub take_singular_hash_path($this, $data, $syntax, $path, $status, $i)
 {
 
     foreach my $syn_el (@$syntax)
     {
         if (ref($syn_el) eq 'HASH')
         {
-            logger("Comparing `%s->[%u]:%s' against `%s'.",
+            logger('Comparing `%s->[%u]:%s\' against `%s\'.',
                    $path,
                    $i,
                    join('|', keys(%{$data->[$i]})),
                    join('|', keys(%$syn_el)))
-                if ($debug);
-            verify_node($data->[$i],
+                if ($Debug);
+            verify_node($this,
+                        $data->[$i],
                         $syn_el,
                         $path . '->[' . $i . ']',
                         $status);
@@ -954,7 +1004,8 @@ sub take_singular_hash_path($data, $syntax, $path, $status, $i)
 #                  that contain special typed fields and then takes the path
 #                  of a matching hash.
 #
-#   Data         - $data        : A reference to the array data item within
+#   Data         - $this        : The internal private object.
+#                  $data        : A reference to the array data item within
 #                                 the record that is to be checked.
 #                  $syntax      : A reference to that part of the syntax tree
 #                                 that is going to be used to check the data
@@ -971,7 +1022,7 @@ sub take_singular_hash_path($data, $syntax, $path, $status, $i)
 
 
 
-sub take_typed_hashes_path($data, $syntax, $path, $status, $i)
+sub take_typed_hashes_path($this, $data, $syntax, $path, $status, $i)
 {
 
     # Look for a special matching type field and value. This will give an exact
@@ -984,8 +1035,9 @@ sub take_typed_hashes_path($data, $syntax, $path, $status, $i)
         {
             if (ref($syn_el) eq 'HASH'
                 and exists($syn_el->{'t:' . $data_key})
-                and match_syntax_value($syn_el->{'t:' . $data_key},
-                                       $data->[$i]->{$data_key}))
+                and match_syntax($this,
+                                 $syn_el->{'t:' . $data_key},
+                                 $data->[$i]->{$data_key}))
             {
                 logger('Comparing `%s->[%u]:%s\' against `%s\' based on type '
                            . 'field `%s\'.',
@@ -994,8 +1046,9 @@ sub take_typed_hashes_path($data, $syntax, $path, $status, $i)
                        join('|', keys(%{$data->[$i]})),
                        join('|', keys(%$syn_el)),
                        $data_key)
-                    if ($debug);
-                verify_node($data->[$i],
+                    if ($Debug);
+                verify_node($this,
+                            $data->[$i],
                             $syn_el,
                             $path . '->[' . $i . ']',
                             $status);
@@ -1016,7 +1069,8 @@ sub take_typed_hashes_path($data, $syntax, $path, $status, $i)
 #                  contain only one field and then takes the path of a
 #                  matching hash.
 #
-#   Data         - $data        : A reference to the array data item within
+#   Data         - $this        : The internal private object.
+#                  $data        : A reference to the array data item within
 #                                 the record that is to be checked.
 #                  $syntax      : A reference to that part of the syntax tree
 #                                 that is going to be used to check the data
@@ -1033,7 +1087,7 @@ sub take_typed_hashes_path($data, $syntax, $path, $status, $i)
 
 
 
-sub take_single_field_hashes_path($data, $syntax, $path, $status, $i)
+sub take_single_field_hashes_path($this, $data, $syntax, $path, $status, $i)
 {
 
     my $data_key = (keys(%{$data->[$i]}))[0];
@@ -1042,15 +1096,16 @@ sub take_single_field_hashes_path($data, $syntax, $path, $status, $i)
         if (ref($syn_el) eq 'HASH' and keys(%$syn_el) == 1)
         {
             my $syn_key = (keys(%$syn_el))[0];
-            if (match_syntax_value($syn_key, $data_key))
+            if (match_syntax($this, $syn_key, $data_key))
             {
                 logger('Comparing `%s->[%u]:%s\' against `%s\'.',
                        $path,
                        $i,
                        $data_key,
                        $syn_key)
-                    if ($debug);
-                verify_node($data->[$i],
+                    if ($Debug);
+                verify_node($this,
+                            $data->[$i],
                             $syn_el,
                             $path . '->[' . $i . ']',
                             $status);
@@ -1061,6 +1116,177 @@ sub take_single_field_hashes_path($data, $syntax, $path, $status, $i)
     }
 
     return;
+
+}
+#
+##############################################################################
+#
+#   Routine      - match_syntax
+#
+#   Description  - Tests a value against an item in the syntax tree.
+#
+#   Data         - $this        : The internal private object.
+#                  $syntax      : The element in the syntax tree that the
+#                                 value is to be compared against.
+#                  $value       : The string that is to be compared against
+#                                 the syntax element.
+#                  $error_text  : A reference to the string that is to contain
+#                                 expected type or range mismatch information.
+#                                 This is optional.
+#                  Return Value : True for a match, otherwise false.
+#
+##############################################################################
+
+
+
+sub match_syntax($this, $syntax, $value = {}, $error_text = undef)
+{
+
+    my ($arg,
+        $result,
+        $type);
+
+    # We don't allow undefined values.
+
+    return unless(defined($value));
+
+    # If $value hasn't been specified then reset it to undef.
+
+    $value = undef if (ref($value) eq 'HASH');
+
+    # Decide what to do based upon the header.
+
+    if ($syntax =~ m/^([cfimRrst]):(.*)/)
+    {
+        $type = $1;
+        $arg = $2;
+    }
+    else
+    {
+        throw('%s(syntax = `%s\').', SCHEMA_ERROR, $syntax);
+    }
+    if ($type eq 'c')
+    {
+        $result = 1;
+    }
+    elsif ($type eq 'f')
+    {
+        my $float_re = '[-+]?(?=\d|\.\d)\d*(?:\.\d*)?(?:[Ee][-+]?\d+)?';
+        if ($arg =~ m/^(?:($float_re))?(?:,($float_re))?$/)
+        {
+            my ($min, $max) = ($1, $2);
+            throw('%s(syntax = `%s\', minimum is greater than maximum).',
+                  SCHEMA_ERROR,
+                  $syntax)
+                if (defined($min) and defined($max) and $min  > $max);
+            if (defined($value)
+                and $value =~ m/^$float_re$/
+                and (not defined($min) or $value >= $min)
+                and (not defined($max) or $value <= $max))
+            {
+                $result = 1;
+            }
+            elsif (defined($error_text))
+            {
+                $$error_text =
+                    sprintf('float between %s and %s',
+                            defined($min) ? $min : '<No Lower Limit>',
+                            defined($max) ? $max : '<No Upper Limit>');
+            }
+        }
+        else
+        {
+            throw('%s(syntax = `%s\').', SCHEMA_ERROR, $syntax);
+        }
+    }
+    elsif ($type eq 'i')
+    {
+        my $int_re = '[-+]?\d+';
+        if ($arg =~ m/^(?:($int_re))?(?:,($int_re)?)?(?:,($int_re)?)?$/)
+        {
+            my ($min, $max, $step) = ($1, $2, $3);
+            throw('%s(syntax = `%s\', minimum is greater than maximum).',
+                  SCHEMA_ERROR,
+                  $syntax)
+                if (defined($min) and defined($max) and $min  > $max);
+            throw('%s(syntax = `%s\', minimum/maximum values are not '
+                      . 'compatible with step value).',
+                  SCHEMA_ERROR,
+                  $syntax)
+                if (defined($step)
+                    and ((defined($min) and ($min % $step) != 0)
+                         or (defined($max) and ($max % $step) != 0)));
+            if (defined($value)
+                and $value =~ m/^$int_re$/
+                and (not defined($min) or $value >= $min)
+                and (not defined($max) or $value <= $max)
+                and (not defined($step) or ($value % $step) == 0))
+            {
+                $result = 1;
+            }
+            elsif (defined($error_text))
+            {
+                $$error_text =
+                    sprintf('integer between %s and %s%s',
+                            defined($min) ? $min : '<No Lower Limit>',
+                            defined($max) ? $max : '<No Upper Limit>',
+                            defined($step) ? " with a step size of $step" : '');
+            }
+        }
+        else
+        {
+            throw('%s(syntax = `%s\').', SCHEMA_ERROR, $syntax);
+        }
+    }
+    elsif ($type eq 'R')
+    {
+        if (exists($this->{syntax_regexes}->{$arg}))
+        {
+            $result = 1
+                if (defined($value)
+                    and $value =~ m/$this->{syntax_regexes}->{$arg}/);
+        }
+        else
+        {
+            throw('%s(syntax = `%s\', unknown syntactic regular expression).',
+                  SCHEMA_ERROR,
+                  $syntax);
+        }
+    }
+    elsif ($type eq 'r')
+    {
+        local $@;
+        eval
+        {
+            if (defined($value))
+            {
+                $result = 1 if ($value =~ m/$arg/);
+            }
+            else
+            {
+                my $dummy = qr/$arg/;
+            }
+            1;
+        }
+        or do
+        {
+            my $err = $@;
+            $err =~ s/ at .+ line \d+\..*//gs;
+            throw($err);
+        };
+    }
+    else
+    {
+        $result = 1 if (defined($value) and $arg eq $value);
+    }
+
+    logger('Comparing `%s\' against `%s\'. Match: %s.',
+           $syntax,
+           $value,
+           ($result) ? 'Yes' : 'No')
+        if ($Debug and defined($value));
+
+    return $result;
 
 }
 #
@@ -1104,7 +1330,11 @@ sub generate_regexes()
         $ipv6 = "$hex4:($ipv6|$tail)";
     }
     $ipv6 = "(:(:$hex4){0,5}((:$hex4){1,2}|:$ipv4)|$ipv6)";
+
+    # The look ahead ensures that there's a letter somewhere in the host name.
+
     my $hostname = "(?=.*[[:alpha:]])($label\\.)*$label";
+
     my $ipv4_block = "$ipv4(/$cidr4)?";
     my $ipv6_block = "$ipv6(/$cidr6)?";
 
@@ -1123,17 +1353,17 @@ sub generate_regexes()
     foreach my $name (keys(%regexes))
     {
         $regexes{$name} =~ s/\((?!\?)/(?:/g;
-        $syntax_regexes{$name} = qr/^(?:$regexes{$name})$/;
+        $Syntax_Regexes{$name} = qr/^(?:$regexes{$name})$/;
     }
 
     # Now compile up the capturing regex strings into capturing and
     # non-capturing objects.
 
-    for my $name (keys(%capturing_regexes))
+    for my $name (keys(%Capturing_Regexes))
     {
-        my $non_capturing = ($capturing_regexes{$name} =~ s/\((?!\?)/(?:/gr);
-        $syntax_regexes{$name} = qr/$non_capturing/;
-        $capturing_regexes{$name} = qr/$capturing_regexes{$name}/;
+        my $non_capturing = ($Capturing_Regexes{$name} =~ s/\((?!\?)/(?:/gr);
+        $Syntax_Regexes{$name} = qr/$non_capturing/;
+        $Capturing_Regexes{$name} = qr/$Capturing_Regexes{$name}/;
     }
 
     return;
@@ -1173,7 +1403,7 @@ Config::Verifier - Verify the structure and values inside Perl data structures
 
 =head1 SYNOPSIS
 
-  use Config::Verifier qw(:syntax_elements :common_routines);
+  use Config::Verifier;
   my %settings_syntax_tree =
       ('m:config_version' => SYNTAX_FLOAT,
        's:service'        =>
@@ -1195,23 +1425,40 @@ Config::Verifier - Verify the structure and values inside Perl data structures
             's:lowercase_usernames'     => 'R:boolean',
             's:plugins_directory'       => 'R:path',
             's:system_users_cache_file' => 'R:path',
-            's:use_syslog'              => 'R:boolean'});
+            's:use_syslog'              => 'R:boolean'},
+       's:allowed_hosts'  =>
+           ['R:hostname',
+            'R:ipv4_addr',
+            'R:ipv4_cidr',
+            'R:ipv6_addr',
+            'R:ipv6_cidr'],
+
+            SYNTAX_CIDR4],
+       's:denied_hosts'  =>
+           ['R:hostname',
+            'R:ipv4_addr',
+            'R:ipv4_cidr',
+            'R:ipv6_addr',
+            'R:ipv6_cidr']);
   my $data = YAML::XS::LoadFile("my-config.yml");
-  my $status = verify($data, \%settings_syntax_tree, "settings");
+  my $verifier = Config::Verifier->new(\%settings_syntax_tree);
+  my $status = $verifier->check($data);
   die("Syntax error detected. The reason given was:\n" . $status)
       if ($status ne "");
 
 =head1 DESCRIPTION
 
-The Config::Verifier module checks the given Perl data structure against the
-specified syntax tree. Whilst it can be used to verify any textual data ingested
-into Perl, its main purpose is to check configuration data. It's also designed
-to be lightweight, not having any dependencies beyond the core Perl modules.
+The Config::Verifier class checks the given Perl data structure against the
+specified syntax tree. Whilst it can be used to verify any structured data
+ingested into Perl, its main purpose is to check human generated configuration
+data as the error messages are designed to be informative and helpful. It's also
+designed to be lightweight, not having any dependencies beyond the core Perl
+modules.
 
 When reading in configuration data from a file, it's up to the caller to decide
-exactly how this data is read in. Typically one would use some sort of parsing
-module like L<JSON> or L<YAML::XS> (which I have found to be the more stringent
-for YAML files).
+exactly how this is done. Typically one would use some sort of parsing module
+like L<JSON> or L<YAML::XS> (which I have found to be the more stringent for
+YAML files).
 
 Whilst this module could be used to verify data from many sources, like RESTful
 API requests, you would invariably be better off with a module that could read
@@ -1223,21 +1470,21 @@ for smaller projects, hence this module.
 If this module is not to your liking then another option, which I believe
 supports ini style configuration files, is L<Config::Validator>.
 
-=head1 SUBROUTINES/METHODS
+=head1 CONSTRUCTOR
 
 =over 4
 
-=item B<verify($data, $syntax, $name)>
+=item B<new([$syntax_tree])>
 
-Checks the specified structure making sure that the domain specific syntax is
-ok.
-
-C<$data> is a reference to the data structure that is to be checked, typically
-a hash, i.e. a record, but it can also be an array. C<$syntax> is a reference
+Creates a new Config::Verifier object. C<$syntax_tree> is an optional reference
 to a syntax tree that describes what data should be present and its basic
-format, including numeric ranges for numbers. C<$name> is a string containing a
-descriptive name for the data structure being checked. This will be used as the
-base name in any error messages returned by this function.
+format.
+
+=back
+
+=head1 SUBROUTINES/METHODS
+
+=over 4
 
 =item B<amount_to_units($amount)[, $want_bits]>
 
@@ -1248,6 +1495,16 @@ to up to TB etc respectively. For the data amounts B and b refer to bytes and
 bits, whilst KiB and KB refer to 1024 bytes and 1000 bytes and so on. If
 C<$want_bits> is set to true then the returned amount is in bits rather than
 bytes. The default default is false and it only applies to amounts of data.
+
+=item B<check($data, $name)>
+
+Checks the specified structure making sure that the domain specific syntax is
+ok.
+
+C<$data> is a reference to the data structure that is to be checked, typically a
+hash, i.e. a record, but it can also be an array. C<$name> is a string
+containing a descriptive name for the data structure being checked. This will be
+used as the base name in any error messages returned by this method.
 
 =item B<debug([$flag])>
 
@@ -1263,9 +1520,10 @@ of s, m, h, d, or w for seconds, minutes, hours, days and weeks respectively.
 
 =item B<match_syntax_value($syntax, $value[, $error])>
 
-Tests the data in C<$value> against an item in the syntax tree as given by
-C<$syntax>. C<$error> is an optional reference to a string that is to contain
-any type/value errors that are detected.
+Tests the data in C<$value> against a syntax pattern as given by C<$syntax>. A
+syntax pattern is something like C<'R:hostname'> or C<'i:1,10'>. C<$error> is an
+optional reference to a string that is to contain any type/value errors that are
+detected.
 
 =item B<register_syntax_regex($name, $regex)>
 
@@ -1273,8 +1531,12 @@ Registers the regular expression string C<$regex>, which is not a compiled RE
 object, as a syntax pattern under the name given in C<$name>. This is then
 available for use as C<'R:<Name>' just like the built in syntax patterns. This
 can be used to replace any built in pattern or extend the list of patterns. The
-regular expression must be anchored, i.e. start and end with ^ and $
+regular expression must be anchored, i.e. start and end with C<^> and C<$>
 respectively.
+
+The new regular expression term either goes into the global default table, which
+will affect newly created objects, or the object's own private table, depending
+upon whether this method is called as a class or an instance method.
 
 =item B<string_to_boolean($string)>
 
@@ -1282,14 +1544,20 @@ Converts the amount given in C<$string> into a boolean (1 or 0). A string
 representing a boolean takes the form as described by C<'R:boolean'> and can be
 one of true, yes, Y, y, or on for true and false, no N, n, off or '' for false.
 
+=item B<syntax_tree($syntax_tree)>
+
+Sets the object's syntax tree reference to the one given in C<$syntax_tree>.
+
 =back
 
 =head1 RETURN VALUES
 
-C<verify()> returns a string containing the details of the problems encountered
-when parsing the data on failure, otherwise an empty string on success.
+c<new()> returns a new Config::Verifier object.
 
 C<amount_to_units()> returns an integer.
+
+C<check()> returns a string containing the details of the problems encountered
+when parsing the data on failure, otherwise an empty string on success.
 
 C<debug()> returns the previous debug message setting as a boolean.
 
@@ -1302,25 +1570,9 @@ C<register_syntax_regex()> returns nothing.
 
 C<string_to_boolean()> returns a boolean.
 
+C<syntax_tree()> returns nothing.
+
 =head1 NOTES
-
-=head2 Import Tags
-
-=over 4
-
-=item B<:common_routines>
-
-When this import tag is used the following routines are imported into the
-calling name space:
-
-    amount_to_units
-    duration_to_seconds
-    match_syntax_value
-    register_syntax_regex
-    string_to_boolean
-    verify
-
-=back
 
 =head2 Syntax Patterns
 
@@ -1352,8 +1604,8 @@ The built in registered ones are:
     R:user_name
     R:variable
 
-One can add to the built in list or replace existing entries by using
-C<register_syntax_regex()>.
+One can add to the built in list or replace existing entries by using the
+C<register_syntax_regex()> method.
 
 =head2 Syntax Trees
 
@@ -1370,14 +1622,15 @@ followed by a colon and then the field name. Key and value types are as follows:
     f:m,M   - A floating point number with optional minimum and Maximum
               qualifiers.
     i:m,M,s - An integer with optional minimum, Maximum and step qualifiers.
-    m:s     - A plain string literal s, invariably representing the name of
-              a mandatory field, which is case sensitive.
+    m:s     - A plain string literal s, representing the name of a mandatory
+              field, which is case sensitive.
     R:n     - A built in regular expression with the name n, that is used to
               match against acceptable values. This can also be used to
               match against optional fields that fit that pattern.
     r:reg   - Like R:n but the regular expression is supplied by the caller.
-    s:s     - A plain string literal s, typically representing the the name
-              of an optional field, which is case sensitive.
+    s:s     - A plain string literal s, representing the the name
+              of an optional field or a literal value, both or which are
+              which are case sensitive.
     t:s     - Like m: but also signifies a typed field, i.e. a field that
               uniquely identifies the type of the record via its value. Its
               corresponding value must uniquely identify the type of record
@@ -1396,7 +1649,7 @@ Please see the example under L</SYNOPSIS>.
 =head1 DIAGNOSTICS
 
 One can generate loads of tracing messages to C<STDERR> when debug mode is
-turned on via the C<debug()> function.
+turned on via the C<debug()> method.
 
 Exceptions are thrown when there is a problem with the supplied syntax tree.
 
