@@ -40,13 +40,14 @@ sub exception_protect($fn)
     eval
     {
         $ret_val = &$fn();
-    };
-    if ($@)
+        1;
+    }
+    or do
     {
         $exception = "$@";
         note("Exception thrown [$exception]");
         return undef;
-    }
+    };
 
     return $ret_val;
 
