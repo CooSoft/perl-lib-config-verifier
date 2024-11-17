@@ -842,6 +842,38 @@ sub verify_hashes($this, $data, $syntax, $path, $status)
                         $path . '->' . $field,
                         $status);
         }
+        elsif ($syn_type eq 'ARRAY' and $syn_el->[0] eq 'l:choice_value'
+               and $field_type eq '')
+        {
+            my (@errs,
+                $ok);
+            foreach my $i (1 .. $#{$syn_el})
+            {
+                my $err = '';
+                if (match_syntax($this, $syn_el->[$i], $data->{$field}, \$err))
+                {
+                    $ok = 1;
+                    last;
+                }
+                elsif ($err ne '')
+                {
+                    push(@errs, $err);
+                }
+            }
+            if (not $ok)
+            {
+                $$status .= sprintf('Unexpected %s found at %s. It doesn\'t '
+                                        . 'match the expected value '
+                                        . "format%s.\n",
+                                    defined($data->{$field})
+                                        ? 'value `' . $data->{$field} . '\''
+                                        : 'undefined value',
+                                    $path . '->' . $field,
+                                    (@errs)
+                                        ? ' (' . join(' or ', @errs) . ')'
+                                        : '');
+            }
+        }
         elsif ($syn_type eq '')
         {
             $$status .= sprintf('The %s field does not contain a simple '
@@ -1151,7 +1183,7 @@ sub match_syntax($this, $syntax, $value = {}, $error_text = undef)
 
     # Decide what to do based upon the header.
 
-    if ($syntax =~ m/^([cfimRrst]):(.*)/)
+    if ($syntax =~ m/^([cfilmRrst]):(.*)/)
     {
         $type = $1;
         $arg = $2;
@@ -1232,6 +1264,20 @@ sub match_syntax($this, $syntax, $value = {}, $error_text = undef)
         {
             throw('%s(syntax = `%s\').', SCHEMA_ERROR, $syntax);
         }
+    }
+    elsif ($type eq 'l')
+    {
+
+        # List types special in that they are ignored when matching data values,
+        # but they determine the way arrays of entries are handled. So we only
+        # check the validity of their setting.
+
+        throw('%s(syntax = `%s\', type of list is not `choice_list\' nor '
+                  . '`choice_value\').',
+              SCHEMA_ERROR,
+              $syntax)
+            if ($arg !~ m/^choice_(?:list|value)$/);
+
     }
     elsif ($type eq 'R')
     {
@@ -1497,9 +1543,9 @@ Checks the specified structure making sure that the domain specific syntax is
 ok.
 
 C<$data> is a reference to the data structure that is to be checked, typically a
-hash, i.e. a record, but it can also be an array. C<$name> is a string
-containing a descriptive name for the data structure being checked. This will be
-used as the base name in any error messages returned by this method.
+hash, i.e. a record, but it can also be a list. C<$name> is a string containing
+a descriptive name for the data structure being checked. This will be used as
+the base name in any error messages returned by this method.
 
 =item B<debug([$flag])>
 
@@ -1617,6 +1663,17 @@ followed by a colon and then the field name. Key and value types are as follows:
     f:m,M   - A floating point number with optional minimum and Maximum
               qualifiers.
     i:m,M,s - An integer with optional minimum, Maximum and step qualifiers.
+    l:type  - The type of list in the syntax tree. This determines how lists
+              are treated. There are two types C<choice_list>, the default,
+              and C<choice_value>:
+              C<choice_list:   With this type a list is expected in the
+                               data, with each element of the syntax list
+                               representing one of the allowed types that an
+                               entry can take within the data list.
+              C<choice_value>: With this type a scalar value is expected in
+                               the data, with each element of the syntax
+                               list representing one of the allowed types
+                               that the data scalar can be.
     m:s     - A plain string literal s, representing the name of a mandatory
               field, which is case sensitive.
     R:n     - A built in regular expression with the name n, that is used to
@@ -1630,7 +1687,7 @@ followed by a colon and then the field name. Key and value types are as follows:
               uniquely identifies the type of the record via its value. Its
               corresponding value must uniquely identify the type of record
               within the list of records at that point in the schema.
-    Arrays  - These represent not only that a list of items should be
+    Lists   - These represent not only that a list of items should be
               present but also that there can be a choice in the different
               types of items, e.g scalar, list or hash.
     Hashes  - These represent records with named fields.
