@@ -747,25 +747,20 @@ sub verify_arrays($this, $data, $syntax, $path, $status)
 sub verify_hashes($this, $data, $syntax, $path, $status)
 {
 
-    my (@mandatory_fields);
-
     # Check that all mandatory fields are present.
 
     foreach my $key (keys(%$syntax))
     {
-        if ($key =~ m/^m\:(.+)$/)
+        if ($key =~ m/^[mt]\:(.+)$/)
         {
-            push(@mandatory_fields, $1);
-        }
-    }
-    foreach my $mandatory_field (@mandatory_fields)
-    {
-        if (not exists($data->{$mandatory_field}))
-        {
-            $$status .= sprintf('The %s record does not contain the mandatory '
-                                    . "field `%s'.\n",
-                                $path,
-                                $mandatory_field);
+            my $mandatory_field = $1;
+            if (not exists($data->{$mandatory_field}))
+            {
+                $$status .= sprintf('The %s record does not contain the '
+                                        . "mandatory field `%s'.\n",
+                                    $path,
+                                    $mandatory_field);
+            }
         }
     }
 
@@ -778,15 +773,15 @@ sub verify_hashes($this, $data, $syntax, $path, $status)
 
         # Locate the matching field in the syntax tree.
 
-        if (exists($syntax->{'m:' . $field}))
+        foreach my $type ('m:', 's:', 't:')
         {
-            $syn_el = $syntax->{'m:' . $field};
+            if (exists($syntax->{$type . $field}))
+            {
+                $syn_el = $syntax->{$type . $field};
+                last;
+            }
         }
-        elsif (exists($syntax->{'s:' . $field}))
-        {
-            $syn_el = $syntax->{'s:' . $field};
-        }
-        else
+        if (not defined($syn_el))
         {
             foreach my $key (keys(%$syntax))
             {
