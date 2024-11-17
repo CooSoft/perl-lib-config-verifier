@@ -175,16 +175,6 @@ push(@bad_machine, @bad);
 test_values(1, 'IPv4 addresses', 'R:ipv4_addr', \@good);
 test_values(0, 'IPv4 addresses', 'R:ipv4_addr', \@bad);
 
-# Check IPv4 block (IP address or CIDR).
-
-@good = ('192.168.1.0/24', '192.168.1.24');
-@bad = (' 192.168.1.2/24', '192.168.1.2/24 ', 'AF.24.5.1/2', '1.1.1.256',
-        '1.1.1.-1');
-test_values(1, 'IPv4 block', 'R:ipv4_block', \@good);
-test_values(0, 'IPv4 block', 'R:ipv4_block', \@bad);
-push(@good_machine, @good);
-push(@bad_machine, @bad);
-
 # Check IPv4 CIDR.
 
 @good = ('192.168.1.0/24', '192.168.1.24/32', '10.0.0.1/0');
@@ -202,16 +192,6 @@ test_values(0, 'IPv4 CIDR', 'R:ipv4_cidr', \@bad);
 test_values(1, 'IPv6 addresses', 'R:ipv6_addr', \@good);
 test_values(0, 'IPv6 addresses', 'R:ipv6_addr', \@bad);
 
-# Check IPv6 block (IP address or CIDR).
-
-@good = ('04fa:0938:237::3927', '04fa:0938:237::3927/128', '::1');
-@bad = (' 04fa:0938:237::3927/64', '04fa:0938:237::3927/28 ',
-        '04fa:0938:g37::3927/2', '04fa:0938:g37::39271');
-test_values(1, 'IPv6 block', 'R:ipv6_block', \@good);
-test_values(0, 'IPv6 block', 'R:ipv6_block', \@bad);
-push(@good_machine, @good);
-push(@bad_machine, @bad);
-
 # Check IPv6 CIDR.
 
 @good = ('04fa:0938:237::3927/64', '04fa:0938:237::3927/128', '::1/0');
@@ -220,11 +200,6 @@ push(@bad_machine, @bad);
         '04fa:0938:237::3927/129', '04fa:0938:237::3927/-128');
 test_values(1, 'IPv6 CIDR', 'R:ipv6_cidr', \@good);
 test_values(0, 'IPv6 CIDR', 'R:ipv6_cidr', \@bad);
-
-# Check machine (can be hostname, IP address or CIDR).
-
-test_values(1, 'machine', 'R:machine', \@good_machine);
-test_values(0, 'machine', 'R:machine', \@bad_machine);
 
 # Check path.
 

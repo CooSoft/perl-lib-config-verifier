@@ -1372,25 +1372,15 @@ sub generate_regexes()
     }
     $ipv6 = "(:(:$hex4){0,5}((:$hex4){1,2}|:$ipv4)|$ipv6)";
 
-    # The look ahead ensures that there's a letter somewhere in the host name.
+    # Make non-capturing, compile and then store the regexes in the main syntax
+    # table. The look ahead for hostname ensures that there's a letter somewhere
+    # in the host name.
 
-    my $hostname = "(?=.*[[:alpha:]])($label\\.)*$label";
-
-    my $ipv4_block = "$ipv4(/$cidr4)?";
-    my $ipv6_block = "$ipv6(/$cidr6)?";
-
-    my %regexes = (hostname   => $hostname,
+    my %regexes = (hostname   => "(?=.*[[:alpha:]])($label\\.)*$label",
                    ipv4_addr  => $ipv4,
-                   ipv4_block => $ipv4_block,
                    ipv4_cidr  => "$ipv4/$cidr4",
                    ipv6_addr  => $ipv6,
-                   ipv6_block => $ipv6_block,
-                   ipv6_cidr  => "$ipv6/$cidr6",
-                   machine    => "($hostname)|($ipv4_block)|($ipv6_block)");
-
-    # Make non-capturing, compile and then store the regexes in the main syntax
-    # table.
-
+                   ipv6_cidr  => "$ipv6/$cidr6");
     foreach my $name (keys(%regexes))
     {
         $regexes{$name} =~ s/\((?!\?)/(?:/g;
@@ -1631,12 +1621,9 @@ The built in registered ones are:
     R:duration
     R:hostname
     R:ipv4_addr
-    R:ipv4_block
     R:ipv4_cidr
     R:ipv6_addr
-    R:ipv6_block
     R:ipv6_cidr
-    R:machine
     R:name
     R:plugin
     R:printable
