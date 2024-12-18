@@ -826,6 +826,8 @@ sub verify_hashes($this, $data, $syntax, $path, $status)
 
         # Ok now check that the value is correct and process it.
 
+        # Scalar - scalar.
+
         if ($syn_type eq '' and $field_type eq '')
         {
             my $err = '';
@@ -841,8 +843,39 @@ sub verify_hashes($this, $data, $syntax, $path, $status)
                                     ($err ne '') ? " ($err)" : '');
             }
         }
-        elsif (($syn_type eq 'ARRAY' and $field_type eq 'ARRAY')
-               or ($syn_type eq 'HASH' and $field_type eq 'HASH'))
+
+        # List of choice values, i.e. a single field that can match against one
+        # of the values in the list (which may include arrays and hashes as well
+        # as scalars).
+
+        elsif ($syn_type eq 'ARRAY' and $syn_el->[0] eq 'l:choice_value')
+        {
+
+            # This is done simply by faking an array with the one entry being
+            # the data item and then handling it as a standard array. We then
+            # alter any returned message to remove this fake array from the
+            # path.
+
+            my $local_status = '';
+            my $new_path = $path . '->' . $field;
+            verify_arrays($this,
+                          [$data->{$field}],
+                          $syn_el,
+                          $new_path,
+                          \$local_status);
+            if ($local_status ne '')
+            {
+                $local_status =~
+                    s/^(.+? \Q${new_path}\E)->\[0\](.*)$/${1}${2}/s;
+                $$status .= $local_status;
+            }
+
+        }
+
+        # Array - array or hash - hash.
+
+        elsif (($syn_type eq 'ARRAY' or $syn_type eq 'HASH')
+               and $syn_type eq $field_type)
         {
             verify_node($this,
                         $data->{$field},
@@ -850,38 +883,9 @@ sub verify_hashes($this, $data, $syntax, $path, $status)
                         $path . '->' . $field,
                         $status);
         }
-        elsif ($syn_type eq 'ARRAY' and $syn_el->[0] eq 'l:choice_value'
-               and $field_type eq '')
-        {
-            my (@errs,
-                $ok);
-            foreach my $i (1 .. $#{$syn_el})
-            {
-                my $err = '';
-                if (match_syntax($this, $syn_el->[$i], $data->{$field}, \$err))
-                {
-                    $ok = 1;
-                    last;
-                }
-                elsif ($err ne '')
-                {
-                    push(@errs, $err);
-                }
-            }
-            if (not $ok)
-            {
-                $$status .= sprintf('Unexpected %s found at %s. It doesn\'t '
-                                        . 'match the expected value '
-                                        . "format%s.\n",
-                                    defined($data->{$field})
-                                        ? 'value `' . $data->{$field} . '\''
-                                        : 'undefined value',
-                                    $path . '->' . $field,
-                                    (@errs)
-                                        ? ' (' . join(' or ', @errs) . ')'
-                                        : '');
-            }
-        }
+
+        # Assorted mismatches.
+
         elsif ($syn_type eq '')
         {
             $$status .= sprintf('The %s field does not contain a simple '

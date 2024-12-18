@@ -249,6 +249,10 @@ like($status,
                {'m:name'   => 'R:printable',
                 'm:host'   => \@host,
                 's:user'   => 'R:user_name'}},
+          {'m:telnet'      =>
+               {'m:name'   => 'R:printable',
+                'm:host'   => \@host,
+                's:user'   => 'R:user_name'}},
           {'t:type'        => 's:vnc',
            'm:name'        => 'R:printable',
            'm:host'        => \@host}]);
@@ -293,11 +297,15 @@ is($status, '', 'Different record types correctly handled');
                          host => 'desktop.acme.co.uk'},
                         {ssh  =>
                              {name => 'Desktop',
+                              host => 'desktop.acme.co.uk'}},
+                        {telnet =>
+                             {name => 'Desktop',
                               host => 'desktop.acme.co.uk'}}]);
 $status = $verifier->check(\%data, 'settings');
 is($status, '', 'Many multi-field records of the same type correctly detected');
 
-# Good syntax tree, good data (many options for a scalar value).
+# Good syntax tree, good data (many different options for the host scalar
+# value).
 
 %data =
     (config_version => 1.0,
@@ -313,10 +321,10 @@ is($status, '', 'Many multi-field records of the same type correctly detected');
                          user => 'system'}],
      menu           => [{type => 'rdp',
                          name => 'Desktop',
-                         host => 'desktop.acme.co.uk'},
+                         host => '192.168.1.22'},
                         {ssh  =>
                              {name => 'Desktop',
-                              host => 'desktop.acme.co.uk'}}]);
+                              host => 'desktop'}}]);
 $status = $verifier->check(\%data, 'settings');
 is($status, '', 'Many multi-field records of the same type correctly detected');
 
@@ -339,24 +347,106 @@ like($exception,
      qr/^Illegal syntax.+\(untyped records must be the only record in a list\)/,
      'Multiple untyped records correctly detected');
 
-# A bad syntax tree that has too many untyped records in a list.
+# A syntax tree that has hosts entries that can contain a scalar value, a list
+# or a record.
 
+my @hosts =
+    ('l:choice_value',
+     'R:hostname',
+     'R:ipv4_addr',
+     'R:ipv6_addr',
+     ['R:hostname', 'R:ipv4_addr','R:ipv6_addr'],
+     {'m:hostname'   => 'R:hostname',
+      'm:ip_address' => 'R:ipv4_addr'});
 %syntax_tree =
     ('m:config_version' => 'f:0',
+     's:options'        =>
+         ['i:',
+          'R:printable',
+          {'m:type'  => 's:ssh',
+           'm:name'  => 'R:printable',
+           'm:hosts' => \@hosts,
+           's:user'  => 'R:user_name'}],
      'm:menu'           =>
-         ['R:printable',
-          {'m:type' => 's:rdp',
-           'm:name' => 'R:printable',
-           'm:host' => \@host,
-           's:user' => 'R:user_name'},
-          {'m:type' => 's:ssh',
-           'm:name' => 'R:printable',
-           'm:host' => \@host,
-           's:user' => 'R:user_name'}]);
-exception_protect(sub { $verifier->syntax_tree(\%syntax_tree); });
-like($exception,
-     qr/^Illegal syntax.+\(untyped records must be the only record in a list\)/,
-     'Multiple untyped records correctly detected');
+         [{'t:type'        => 's:rdp',
+           'm:name'        => 'R:printable',
+           'm:hosts'       => \@hosts,
+           's:user'        => 'R:user_name',
+           's:domain_name' => 'R:hostname'},
+          {'m:ssh'         =>
+               {'m:name'   => 'R:printable',
+                'm:hosts'  => \@hosts,
+                's:user'   => 'R:user_name'}},
+          {'m:telnet'      =>
+               {'m:name'   => 'R:printable',
+                'm:hosts'  => \@hosts,
+                's:user'   => 'R:user_name'}},
+          {'t:type'        => 's:vnc',
+           'm:name'        => 'R:printable',
+           'm:hosts'       => \@hosts}]);
+$verifier->syntax_tree(\%syntax_tree);
+
+# Good syntax tree, good data (many different options for the host scalar
+# value).
+
+%data =
+    (config_version => 1.0,
+     options        => [26343,
+                        'Hello world!',
+                        {type  => 'ssh',
+                         name  => 'Main server',
+                         hosts => 'server.acme.co.uk',
+                         user  => 'system'},
+                        {type  => 'ssh',
+                         name  => 'File server',
+                         hosts => '192.168.1.22',
+                         user  => 'system'}],
+     menu           => [{type   => 'rdp',
+                         name   => 'Desktop',
+                         hosts  => ['desktop.acme.co.uk', 'server.acme.co.uk']},
+                        {ssh    =>
+                             {name  => 'Desktop',
+                              hosts => {hostname   => 'desktop.acme.co.uk',
+                                        ip_address => '192.168.1.24'}}},
+                        {telnet =>
+                             {name  => 'Desktop',
+                              hosts => {hostname   => 'fileserver.acme.co.uk',
+                                        ip_address => '192.168.1.22'}}}]);
+$status = $verifier->check(\%data, 'settings');
+is($status, '', 'Many different forms of hosts file correctly detected');
+
+# Good syntax tree, bad hosts entries.
+
+%data =
+    (config_version => 1.0,
+     options        => [26343,
+                        'Hello world!',
+                        {type  => 'ssh',
+                         name  => 'Main server',
+                         hosts => 'server.acme.co.uk',
+                         user  => 'system'},
+                        {type  => 'ssh',
+                         name  => 'File server',
+                         hosts => '192.168.1.22',
+                         user  => 'system'}],
+     menu           => [{type   => 'rdp',
+                         name   => 'Desktop',
+                         hosts  => ['desktop.acme.co.uk', '192.168.1.22/24']},
+                        {ssh    =>
+                             {name  => 'Desktop',
+                              hosts => {hostname   => ['desktop.acme.co.uk'],
+                                        ip_address => '192.168.1.24'}}},
+                        {telnet =>
+                             {name  => 'Desktop',
+                              hosts => {hostname     => 'fileserver.acme.co.uk',
+                                        ip_addresses => '192.168.1.22'}}}]);
+$status = $verifier->check(\%data, 'settings');
+like($status,
+     qr/^Unexpected\ value\ \S+\Q found at settings->menu->[0]->hosts->[1].\E.+?
+        \QThe settings->menu->[1]->ssh->hosts->hostname \E.+?
+        \QThe settings->menu->[2]->telnet->hosts \E.+?
+        \QThe settings->menu->[2]->telnet->hosts->[0] \E.+/sx,
+     'Bad hosts field entries correctly detected');
 
 done_testing();
 
