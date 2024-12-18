@@ -514,7 +514,7 @@ sub verify_node($this, $data, $syntax, $path, $status)
 
     else
     {
-        throw('Settings syntax parser, internal state error detected.');
+        throw('Settings syntax parser, unexpected syntax element encountered.');
     }
 
     return;
@@ -557,7 +557,7 @@ sub verify_arrays($this, $data, $syntax, $path, $status)
 
         if (ref($data->[$i]) eq '')
         {
-            my $err = '';
+            my @errs;
             foreach my $syn_el (@$syntax)
             {
                 if (ref($syn_el) eq '')
@@ -568,8 +568,15 @@ sub verify_arrays($this, $data, $syntax, $path, $status)
                            $data->[$i],
                            $syn_el)
                         if ($Debug);
-                    next array_element
-                        if (match_syntax($this, $syn_el, $data->[$i], \$err));
+                    my $err = '';
+                    if (match_syntax($this, $syn_el, $data->[$i], \$err))
+                    {
+                        next array_element;
+                    }
+                    elsif ($err ne '')
+                    {
+                        push(@errs, $err);
+                    }
                 }
             }
             $$status .= sprintf('Unexpected %s found at %s->[%u]. It either '
@@ -581,7 +588,8 @@ sub verify_arrays($this, $data, $syntax, $path, $status)
                                     : 'undefined value',
                                 $path,
                                 $i,
-                                ($err ne '') ? " ($err)" : '');
+                                (@errs) ? ' (' . join(' or ', @errs) . ')'
+                                        : '');
         }
 
         # We are comparing arrays.
@@ -1156,7 +1164,8 @@ sub take_single_field_hashes_path($this, $data, $syntax, $path, $status, $i)
 #                  $syntax      : The element in the syntax tree that the
 #                                 value is to be compared against.
 #                  $value       : The string that is to be compared against
-#                                 the syntax element.
+#                                 the syntax element. This is not given when
+#                                 checking the syntax tree for errors.
 #                  $error_text  : A reference to the string that is to contain
 #                                 expected type or range mismatch information.
 #                                 This is optional.
@@ -1268,9 +1277,9 @@ sub match_syntax($this, $syntax, $value = {}, $error_text = undef)
     elsif ($type eq 'l')
     {
 
-        # List types special in that they are ignored when matching data values,
-        # but they determine the way arrays of entries are handled. So we only
-        # check the validity of their setting.
+        # List types are special in that they are ignored when matching data
+        # values, but they determine the way arrays of entries are handled. So
+        # we only check the validity of their setting.
 
         throw('%s(syntax = `%s\', type of list is not `choice_list\' nor '
                   . '`choice_value\').',
