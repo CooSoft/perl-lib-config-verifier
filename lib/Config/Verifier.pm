@@ -719,9 +719,10 @@ sub verify_arrays($this, $data, $syntax, $path, $status)
 
     # Unlikely but just check for empty arrays.
 
-    if (@$data == 0)
+    if (@$data == 0 and $syntax->[0]
+        !~ m/^l:choice_(?:list|value)(?:,allow_empty_list)?$/)
     {
-        $$status .= sprintf("Empty array found at %s. These are not allowed.\n",
+        $$status .= sprintf("Empty array found at %s. This is not allowed.\n",
                             $path);
     }
 
@@ -848,7 +849,7 @@ sub verify_hashes($this, $data, $syntax, $path, $status)
         # of the values in the list (which may include arrays and hashes as well
         # as scalars).
 
-        elsif ($syn_type eq 'ARRAY' and $syn_el->[0] eq 'l:choice_value')
+        elsif ($syn_type eq 'ARRAY' and $syn_el->[0] =~ m/^l:choice_value/)
         {
 
             # This is done simply by faking an array with the one entry being
@@ -1285,11 +1286,12 @@ sub match_syntax($this, $syntax, $value = {}, $error_text = undef)
         # values, but they determine the way arrays of entries are handled. So
         # we only check the validity of their setting.
 
-        throw('%s(syntax = `%s\', type of list is not `choice_list\' nor '
-                  . '`choice_value\').',
+        throw('%s(syntax = `%s\', type of list is must be `choice_list\' or '
+                  . '`choice_value\' optionally followed by '
+                  . '`,allow_empty_list\').',
               SCHEMA_ERROR,
               $syntax)
-            if ($arg !~ m/^choice_(?:list|value)$/);
+            if ($arg !~ m/^choice_(?:list|value)(?:,allow_empty_list)?$/);
 
     }
     elsif ($type eq 'R')
@@ -1573,7 +1575,7 @@ detected.
 
 Registers the regular expression string C<$regex>, which is not a compiled RE
 object, as a syntax pattern under the name given in C<$name>. This is then
-available for use as C<'R:<Name>' just like the built in syntax patterns. This
+available for use as C<'R:name'> just like the built in syntax patterns. This
 can be used to replace any built in pattern or extend the list of patterns. The
 regular expression must be anchored, i.e. start and end with C<^> and C<$>
 respectively.
@@ -1596,7 +1598,7 @@ Sets the object's syntax tree reference to the one given in C<$syntax_tree>.
 
 =head1 RETURN VALUES
 
-c<new()> returns a new Config::Verifier object.
+C<new()> returns a new Config::Verifier object.
 
 C<amount_to_units()> returns an integer.
 
@@ -1666,14 +1668,23 @@ followed by a colon and then the field name. Key and value types are as follows:
     l:type  - The type of list in the syntax tree. This determines how lists
               are treated. There are two types C<choice_list>, the default,
               and C<choice_value>:
-              C<choice_list:   With this type a list is expected in the
+              C<choice_list>:  With this type a list is expected in the
                                data, with each element of the syntax list
                                representing one of the allowed types that an
                                entry can take within the data list.
-              C<choice_value>: With this type a scalar value is expected in
+              C<choice_value>: With this type a singular item is expected in
                                the data, with each element of the syntax
                                list representing one of the allowed types
-                               that the data scalar can be.
+                               that the data item can be. Having said that,
+                               should a list or record be specified in the
+                               syntax list then this permits the singular
+                               data item to also be a list or record. Thus
+                               you could use this type of list to have a
+                               field that could take a scalar value, a list
+                               or a record.
+              Each type can also take an additional C<,allow_empty_list>
+              qualifier. This permits the list to be empty in the data. The
+              default is to treat an empty list as an error.
     m:s     - A plain string literal s, representing the name of a mandatory
               field, which is case sensitive.
     R:n     - A built in regular expression with the name n, that is used to

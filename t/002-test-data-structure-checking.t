@@ -326,7 +326,7 @@ is($status, '', 'Many multi-field records of the same type correctly detected');
                              {name => 'Desktop',
                               host => 'desktop'}}]);
 $status = $verifier->check(\%data, 'settings');
-is($status, '', 'Many multi-field records of the same type correctly detected');
+is($status, '', 'Many diferent forms of host values correctly detected');
 
 # A bad syntax tree that has too many untyped records in a list.
 
@@ -368,7 +368,8 @@ my @hosts =
            'm:hosts' => \@hosts,
            's:user'  => 'R:user_name'}],
      'm:menu'           =>
-         [{'t:type'        => 's:rdp',
+         ['l:choice_list,allow_empty_list',
+          {'t:type'        => 's:rdp',
            'm:name'        => 'R:printable',
            'm:hosts'       => \@hosts,
            's:user'        => 'R:user_name',
@@ -446,6 +447,45 @@ like($status,
         \QThe settings->menu->[1]->ssh->hosts->hostname \E.+?
         \QThe settings->menu->[2]->telnet->hosts \E.+?
         \QThe settings->menu->[2]->telnet->hosts->[0] \E.+/sx,
+     'Bad hosts field entries correctly detected');
+
+# Good syntax tree, ok empty menu list.
+
+%data =
+    (config_version => 1.0,
+     options        => [26343,
+                        'Hello world!',
+                        {type  => 'ssh',
+                         name  => 'Main server',
+                         hosts => 'server.acme.co.uk',
+                         user  => 'system'},
+                        {type  => 'ssh',
+                         name  => 'File server',
+                         hosts => '192.168.1.22',
+                         user  => 'system'}],
+     menu           => []);
+$status = $verifier->check(\%data, 'settings');
+is($status, '', 'Empty list is correctly allowed');
+
+# Good syntax tree, bad empty options list.
+
+%data =
+    (config_version => 1.0,
+     options        => [],
+     menu           => [{type   => 'rdp',
+                         name   => 'Desktop',
+                         hosts  => ['desktop.acme.co.uk', 'server.acme.co.uk']},
+                        {ssh    =>
+                             {name  => 'Desktop',
+                              hosts => {hostname   => 'desktop.acme.co.uk',
+                                        ip_address => '192.168.1.24'}}},
+                        {telnet =>
+                             {name  => 'Desktop',
+                              hosts => {hostname   => 'fileserver.acme.co.uk',
+                                        ip_address => '192.168.1.22'}}}]);
+$status = $verifier->check(\%data, 'settings');
+like($status,
+     qr/^\QEmpty array found at settings->options. This is not allowed.\E$/,
      'Bad hosts field entries correctly detected');
 
 done_testing();
