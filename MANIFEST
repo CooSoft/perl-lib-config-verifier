@@ -1,0 +1,10 @@
+Changes
+LICENSE
+MANIFEST
+META.json
+META.yml
+Makefile.PL
+README.md
+lib/Config/Verifier.pm
+t/001-test-value-checks.t
+t/002-test-data-structure-checking.t
