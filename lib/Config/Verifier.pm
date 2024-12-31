@@ -680,17 +680,15 @@ sub verify_arrays($this, $data, $syntax, $path, $status)
 
             if (keys(%{$data->[$i]}) == 1)
             {
-                if ($hash_state | SINGLE_FIELD_HASHES)
-                {
-                    if (take_single_field_hashes_path($this,
+                if (($hash_state & SINGLE_FIELD_HASHES)
+                    and take_single_field_hashes_path($this,
                                                       $data,
                                                       $syntax,
                                                       $path,
                                                       $status,
                                                       $i))
-                    {
-                        next array_element;
-                    }
+                {
+                    next array_element;
                 }
                 $$status .= sprintf('Unexpected single type field record with '
                                         . 'a type name of `%s\' found at '
@@ -705,17 +703,15 @@ sub verify_arrays($this, $data, $syntax, $path, $status)
 
             else
             {
-                if ($hash_state | TYPED_FIELD_HASHES)
-                {
-                    if (take_typed_hashes_path($this,
+                if (($hash_state & TYPED_FIELD_HASHES)
+                    and take_typed_hashes_path($this,
                                                $data,
                                                $syntax,
                                                $path,
                                                $status,
                                                $i))
-                    {
-                        next array_element;
-                    }
+                {
+                    next array_element;
                 }
                 $$status .= sprintf('Unexpected multi-field record that is '
                                         . 'either untyped or an unrecognised '
