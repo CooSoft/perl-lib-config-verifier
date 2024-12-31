@@ -1221,6 +1221,10 @@ sub match_syntax($this, $syntax, $value = {}, $error_text = undef)
 
     $value = undef if (ref($value) eq 'HASH');
 
+    # It's an error if a syntax entry is undefined.
+
+    throw('%s(syntax = `undef\').', SCHEMA_ERROR) unless (defined($syntax));
+
     # Decide what to do based upon the header.
 
     if ($syntax =~ m/^([cfilmRrst]):(.*)/)
