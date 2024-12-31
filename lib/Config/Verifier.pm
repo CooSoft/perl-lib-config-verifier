@@ -35,7 +35,6 @@ use warnings;
 # Standard Perl and CPAN modules.
 
 use IO::Handle;
-use List::Util qw(any);
 use POSIX qw(:limits_h);
 
 # ***** GLOBAL DATA DECLARATIONS *****
@@ -834,12 +833,13 @@ sub verify_hashes($this, $data, $syntax, $path, $status)
             $$status .= sprintf('The %s record contains an invalid field '
                                     . "`%s'.\n",
                                 $path,
-                                $field)
-                unless (any(sub {/^c\:$/}, keys(%$syntax)));
+                                $field);
             next hash_key;
         }
 
-        my $syn_type = ref($syn_el);
+        # Skip custom fields.
+
+        next hash_key if ($syn_el eq 'c:');
 
         # Ok now check that the value is correct and process it.
 
@@ -1234,6 +1234,10 @@ sub match_syntax($this, $syntax, $value = {}, $error_text = undef)
     }
     if ($type eq 'c')
     {
+        throw('%s(syntax = `%s\', custom field entries have no name).',
+              SCHEMA_ERROR,
+              $syntax)
+            if ($arg ne '');
         $result = 1;
     }
     elsif ($type eq 'f')
