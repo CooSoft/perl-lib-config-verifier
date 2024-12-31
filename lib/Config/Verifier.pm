@@ -1077,6 +1077,7 @@ sub take_singular_hash_path($this, $data, $syntax, $path, $status, $i)
 #                  $status      : A reference to a string that is to contain a
 #                                 description of what is wrong. If everything
 #                                 is ok then this string will be empty.
+#                  $i           : The current index in the data array.
 #                  Return Value : True if a path was taken, otherwise false if
 #                                 not.
 #
@@ -1142,6 +1143,7 @@ sub take_typed_hashes_path($this, $data, $syntax, $path, $status, $i)
 #                  $status      : A reference to a string that is to contain a
 #                                 description of what is wrong. If everything
 #                                 is ok then this string will be empty.
+#                  $i           : The current index in the data array.
 #                  Return Value : True if a path was taken, otherwise false if
 #                                 not.
 #
@@ -1209,7 +1211,7 @@ sub match_syntax($this, $syntax, $value = {}, $error_text = undef)
         $result,
         $type);
 
-    # We don't allow undefined values.
+    # We don't allow undefined values and so never match.
 
     return unless(defined($value));
 
