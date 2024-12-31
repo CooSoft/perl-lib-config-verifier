@@ -34,7 +34,6 @@ use warnings;
 
 # Standard Perl and CPAN modules.
 
-use Carp;
 use IO::Handle;
 use List::Util qw(any);
 use POSIX qw(:limits_h);
@@ -124,7 +123,10 @@ state sub take_singular_hash_path;
 state sub take_typed_hashes_path;
 state sub throw($format, @args)
 {
-    croak(sprintf($format, @args));
+    package Config::Verifier::Exception;
+    use Carp;
+    use overload q("") => sub { return $_[0]->{msg}; };
+    croak(bless({msg => sprintf($format, @args)}));
 }
 state sub verify_arrays;
 state sub verify_hashes;
