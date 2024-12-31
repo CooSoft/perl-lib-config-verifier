@@ -498,25 +498,32 @@ sub check_syntax_tree($this, $syntax)
 sub verify_node($this, $data, $syntax, $path, $status)
 {
 
+    my $data_type = ref($data);
+    my $syntax_type = ref($syntax);
+
     # Check arrays, these are not only lists but also branch points.
 
-    if (ref($data) eq 'ARRAY' and ref($syntax) eq 'ARRAY')
+    if ($data_type eq 'ARRAY' and $syntax_type eq 'ARRAY')
     {
         verify_arrays($this, $data, $syntax, $path, $status);
     }
 
     # Check records.
 
-    elsif (ref($data) eq 'HASH' and ref($syntax) eq 'HASH')
+    elsif ($data_type eq 'HASH' and $syntax_type eq 'HASH')
     {
         verify_hashes($this, $data, $syntax, $path, $status);
     }
 
-    # We should never see any other types as scalars are dealt with on the spot.
+    # We have a mismatch.
 
+    elsif ($syntax_type eq 'ARRAY')
+    {
+        $$status .= sprintf("The %s field is not a list.\n", $path);
+    }
     else
     {
-        throw('Settings syntax parser, unexpected syntax element encountered.');
+        $$status .= sprintf("The %s field is not a record.\n", $path);
     }
 
     return;
@@ -555,9 +562,11 @@ sub verify_arrays($this, $data, $syntax, $path, $status)
     array_element: foreach my $i (0 .. $#$data)
     {
 
+        my $data_type = ref($data->[$i]);
+
         # We are comparing scalar values.
 
-        if (ref($data->[$i]) eq '')
+        if ($data_type eq '')
         {
             my @errs;
             foreach my $syn_el (@$syntax)
@@ -596,7 +605,7 @@ sub verify_arrays($this, $data, $syntax, $path, $status)
 
         # We are comparing arrays.
 
-        elsif (ref($data->[$i]) eq 'ARRAY')
+        elsif ($data_type eq 'ARRAY')
         {
 
             my $local_status = '';
@@ -644,7 +653,7 @@ sub verify_arrays($this, $data, $syntax, $path, $status)
         # We are comparing hashes, records, so look to see if there is a common
         # field in one of the syntax hashes. If so then take that branch.
 
-        elsif (ref($data->[$i]) eq 'HASH')
+        elsif ($data_type eq 'HASH')
         {
 
             # First determine what type of hashes we have in the syntax array
@@ -709,12 +718,25 @@ sub verify_arrays($this, $data, $syntax, $path, $status)
                         next array_element;
                     }
                 }
-                $$status .= sprintf('Unexpected untyped multi-field record '
-                                        . "found at %s->[%u].\n",
+                $$status .= sprintf('Unexpected multi-field record that is '
+                                        . 'either untyped or an unrecognised '
+                                        . "type found at %s->[%u].\n",
                                     $path,
                                     $i);
             }
 
+        }
+
+        # We have something other than a scalar, array or hash. This isn't
+        # supported.
+
+        else
+        {
+            $$status .= sprintf('Unsupported data type `%s\' found at '
+                                    . "%s->[%u].\n",
+                                $data_type,
+                                $path,
+                                $i);
         }
 
     }
@@ -724,7 +746,7 @@ sub verify_arrays($this, $data, $syntax, $path, $status)
     if (@$data == 0 and $syntax->[0]
         !~ m/^l:choice_(?:list|value)(?:,allow_empty_list)?$/)
     {
-        $$status .= sprintf("Empty array found at %s. This is not allowed.\n",
+        $$status .= sprintf("Empty list found at %s. This is not allowed.\n",
                             $path);
     }
 
@@ -818,20 +840,22 @@ sub verify_hashes($this, $data, $syntax, $path, $status)
         }
 
         my $syn_type = ref($syn_el);
+
+        # Ok now check that the value is correct and process it.
+
+        my $syntax_type = ref($syn_el);
         my $field_type = ref($data->{$field});
 
         logger('Comparing `%s->%s:%s\' against `%s\'.',
                $path,
                $field,
                ($field_type eq '') ? $data->{$field} : '(' . $field_type . ')',
-               ($syn_type eq '') ? $syn_el : '(' . $syn_type . ')')
+               ($syntax_type eq '') ? $syn_el : '(' . $syntax_type . ')')
             if ($Debug);
-
-        # Ok now check that the value is correct and process it.
 
         # Scalar - scalar.
 
-        if ($syn_type eq '' and $field_type eq '')
+        if ($syntax_type eq '' and $field_type eq '')
         {
             my $err = '';
             if (not match_syntax($this, $syn_el, $data->{$field}, \$err))
@@ -851,7 +875,7 @@ sub verify_hashes($this, $data, $syntax, $path, $status)
         # of the values in the list (which may include arrays and hashes as well
         # as scalars).
 
-        elsif ($syn_type eq 'ARRAY' and $syn_el->[0] =~ m/^l:choice_value/)
+        elsif ($syntax_type eq 'ARRAY' and $syn_el->[0] =~ m/^l:choice_value/)
         {
 
             # This is done simply by faking an array with the one entry being
@@ -877,8 +901,8 @@ sub verify_hashes($this, $data, $syntax, $path, $status)
 
         # Array - array or hash - hash.
 
-        elsif (($syn_type eq 'ARRAY' or $syn_type eq 'HASH')
-               and $syn_type eq $field_type)
+        elsif (($syntax_type eq 'ARRAY' or $syntax_type eq 'HASH')
+               and $syntax_type eq $field_type)
         {
             verify_node($this,
                         $data->{$field},
@@ -889,18 +913,18 @@ sub verify_hashes($this, $data, $syntax, $path, $status)
 
         # Assorted mismatches.
 
-        elsif ($syn_type eq '')
+        elsif ($syntax_type eq '')
         {
             $$status .= sprintf('The %s field does not contain a simple '
                                     . "value.\n",
                                 $path . '->' . $field);
         }
-        elsif ($syn_type eq 'ARRAY')
+        elsif ($syntax_type eq 'ARRAY')
         {
-            $$status .= sprintf("The %s field is not an array.\n",
+            $$status .= sprintf("The %s field is not a list.\n",
                                 $path . '->' . $field);
         }
-        elsif ($syn_type eq 'HASH')
+        else
         {
             $$status .= sprintf("The %s field is not a record.\n",
                                 $path . '->' . $field);
@@ -962,7 +986,7 @@ sub check_hashes_in_array($syntax)
                         $typed = 1;
                         $typed_field_hashes = 1;
                         ++ $nr_typed_keys;
-                        throw('%s(only one typed field can the present in a '
+                        throw('%s(only one typed field can be present in a '
                                   . 'record).',
                               SCHEMA_ERROR)
                             if ($nr_typed_keys > 1);
