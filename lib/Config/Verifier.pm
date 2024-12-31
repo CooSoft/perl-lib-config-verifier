@@ -1341,6 +1341,9 @@ sub match_syntax($this, $syntax, $value = {}, $error_text = undef)
     }
     elsif ($type eq 'r')
     {
+        throw('`%s\' is not anchored to the start and end of the string.',
+              $arg)
+            if ($arg !~ m/^\^.*\$$/);
         local $@;
         eval
         {
