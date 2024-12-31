@@ -96,8 +96,8 @@ my %Capturing_Regexes = (amount      => '^([-+]?\d+(?:\.\d+)?)([KMGT])?$',
 
 my %Syntax_Regexes =
     (anything              => qr/^.+$/,
-     boolean               => qr/^(?:true|yes|[Yy]|on|1|
-                                     false|no|[Nn]|off|0|(?!.))$/x,
+     boolean               => qr/^(?:true|yes|y|on|1|
+                                     false|no|n|off|0|(?!.))$/ix,
      name                  => qr/^[-_.\'"()\[\] [:alnum:]]+$/,
      plugin                => qr/^[-_.[:alnum:]]+$/,
      printable             => qr/^[[:print:]]+$/,
@@ -172,7 +172,7 @@ sub debug($, $value = undef)
 sub duration_to_seconds;
 sub string_to_boolean($, $value)
 {
-    return ($value =~ m/^(?:true|yes|[Yy]|on|1)$/) ? 1 : 0;
+    return ($value =~ m/^(?:true|yes|y|on|1)$/i) ? 1 : 0;
 }
 
 # ***** PACKAGE INFORMATION *****
