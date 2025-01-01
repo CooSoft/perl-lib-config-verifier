@@ -1713,7 +1713,7 @@ followed by a colon and then the field name. Key and value types are as follows:
 
     c:      - Custom entries follow, i.e. a key lookup failure isn't an
               error. This is used to cater for parts of a syntax tree that
-              need to be dynamic and need to be handled separately.
+              need to be dynamic and handled separately.
     f:m,M   - A floating point number with optional minimum and Maximum
               qualifiers.
     i:m,M,s - An integer with optional minimum, Maximum and step qualifiers.
@@ -1766,7 +1766,16 @@ Please see the example under L</SYNOPSIS>.
 One can generate loads of tracing messages to C<STDERR> when debug mode is
 turned on via the C<debug()> method.
 
-Exceptions are thrown when there is a problem with the supplied syntax tree.
+With the exception of the C<debug()> and C<string_to_boolean()> methods,
+exceptions are thrown when there is a problem with the supplied syntax tree or
+value. Since illegal values read in from configuration data will be detected
+when it is parsed, exceptions from these methods will most likely indicate a
+fault with the calling program. Exceptions from this library are
+C<Config::Verifier::Exception> objects that can be cast to strings.
+
+Problems with the data being parsed are returned as a string from the C<check()>
+method. Where possible all parsing errors will be listed, one line per error, in
+a form suitable for the end user.
 
 =head1 DEPENDENCIES
 
