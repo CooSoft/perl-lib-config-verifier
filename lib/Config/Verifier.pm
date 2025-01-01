@@ -1439,15 +1439,22 @@ sub generate_regexes()
     }
     $ipv6 = "(:(:$hex4){0,5}((:$hex4){1,2}|:$ipv4)|$ipv6)";
 
-    # Make non-capturing, compile and then store the regexes in the main syntax
-    # table. The look ahead for hostname ensures that there's a letter somewhere
-    # in the host name.
+    # The look ahead for hostname ensures that there's a letter somewhere in the
+    # host name.
 
-    my %regexes = (hostname   => "(?=.*[[:alpha:]])($label\\.)*$label",
-                   ipv4_addr  => $ipv4,
-                   ipv4_cidr  => "$ipv4/$cidr4",
-                   ipv6_addr  => $ipv6,
-                   ipv6_cidr  => "$ipv6/$cidr6");
+    my $hostname = "(?=.*[[:alpha:]])($label\\.)*$label";
+
+    # Make non-capturing, compile and then store the regexes in the main syntax
+    # table.
+
+    my %regexes =
+        (hostname     => $hostname,
+         ipv4_addr    => $ipv4,
+         ipv4_cidr    => "$ipv4/$cidr4",
+         ipv6_addr    => $ipv6,
+         ipv6_cidr    => "$ipv6/$cidr6",
+         windows_path => "(\\\\\\\\$hostname\\\\|[[:alpha:]]:(\\\\)?)?"
+                             . '((?=.*[^\\\\])(?!.*[<>:"/|?*]).)+');
     foreach my $name (keys(%regexes))
     {
         $regexes{$name} =~ s/\((?!\?)/(?:/g;
@@ -1698,6 +1705,7 @@ The built in registered ones are:
     R:unix_path
     R:user_name
     R:variable
+    R:windows_path
 
 One can add to the built in list or replace existing entries by using the
 C<register_syntax_regex()> method.
