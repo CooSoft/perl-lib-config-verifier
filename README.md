@@ -8,7 +8,7 @@ Config::Verifier - Verify the structure and values inside Perl data structures
 
 # SYNOPSIS
 
-    use Config::Verifier qw(:syntax_elements :common_routines);
+    use Config::Verifier;
     my %settings_syntax_tree =
         ('m:config_version' => SYNTAX_FLOAT,
          's:service'        =>
@@ -25,29 +25,43 @@ Config::Verifier - Verify the structure and values inside Perl data structures
                                               . '|DEBUG_SYSTEM_USERS_DUMP'
                                               . '|DEBUG_STACK_TRACES)$'],
               's:hostname_cache'          =>
-                  {'s:ttl'            => 'R:duration_seconds',
-                   's:purge_interval' => 'R:duration_seconds'},
+                  {'s:ttl'            => 'R:duration',
+                   's:purge_interval' => 'R:duration'},
               's:lowercase_usernames'     => 'R:boolean',
               's:plugins_directory'       => 'R:path',
               's:system_users_cache_file' => 'R:path',
-              's:use_syslog'              => 'R:boolean'});
-    my $data = YAML::XS::LoadFile("my-config.yml");
-    my $status = "";
-    verify($data, \%settings_syntax_tree, "settings", \$status);
+              's:use_syslog'              => 'R:boolean'},
+         's:allowed_hosts'  =>
+             ['R:hostname',
+              'R:ipv4_addr',
+              'R:ipv4_cidr',
+              'R:ipv6_addr',
+              'R:ipv6_cidr'],
+         's:denied_hosts'  =>
+             ['R:hostname',
+              'R:ipv4_addr',
+              'R:ipv4_cidr',
+              'R:ipv6_addr',
+              'R:ipv6_cidr']);
+    my $data = YAML::XS::LoadFile('my-config.yml');
+    my $verifier = Config::Verifier->new(\%settings_syntax_tree);
+    my $status = $verifier->check($data);
     die("Syntax error detected. The reason given was:\n" . $status)
-        if ($status ne "");
+        if ($status ne '');
 
 # DESCRIPTION
 
-The Config::Verifier module checks the given Perl data structure against the
-specified syntax tree. Whilst it can be used to verify any textual data ingested
-into Perl, its main purpose is to check configuration data. It's also designed
-to be lightweight, not having any dependencies beyond the core Perl modules.
+The Config::Verifier class checks the given Perl data structure against the
+specified syntax tree. Whilst it can be used to verify any structured data
+ingested into Perl, its main purpose is to check human generated configuration
+data as the error messages are designed to be informative and helpful. It's also
+designed to be lightweight, not having any dependencies beyond the core Perl
+modules.
 
 When reading in configuration data from a file, it's up to the caller to decide
-exactly how this data is read in. Typically one would use some sort of parsing
-module like [JSON](https://metacpan.org/pod/JSON) or [YAML::XS](https://metacpan.org/pod/YAML%3A%3AXS) (which I have found to be the more stringent
-for YAML files).
+exactly how this is done. Typically one would use some sort of parsing module
+like [JSON](https://metacpan.org/pod/JSON) or [YAML::XS](https://metacpan.org/pod/YAML%3A%3AXS) (which I have found to be the more stringent for
+YAML files).
 
 Whilst this module could be used to verify data from many sources, like RESTful
 API requests, you would invariably be better off with a module that could read
@@ -59,32 +73,35 @@ for smaller projects, hence this module.
 If this module is not to your liking then another option, which I believe
 supports ini style configuration files, is [Config::Validator](https://metacpan.org/pod/Config%3A%3AValidator).
 
+# CONSTRUCTOR
+
+- **new(\[$syntax\_tree\])**
+
+    Creates a new Config::Verifier object. `$syntax_tree` is an optional reference
+    to a syntax tree that describes what data should be present and its basic
+    format.
+
 # SUBROUTINES/METHODS
 
-- **verify(\\%data, \\%syntax, $path, \\$status)**
-
-    Checks the specified structure making sure that the domain specific syntax is
-    ok.
-
-    `\%data` is a reference to the data structure that is to be checked, typically
-    a hash, i.e. a record, but it can also be an array. `\%syntax` is a reference
-    to a syntax tree that describes what data should be present and its basic
-    format, including numeric ranges for numbers. `$path` is a string containing a
-    descriptive name for the data structure being checked. This will be used as the
-    base name in any error messages returned by this function. Lastly `$status` is
-    a reference to a string that is to contain any error message resulting from
-    parsing the data. `$status` should always be initialised to an empty string.
-    Upon return if there's a problem with the data structure then the details will
-    be contained within `$status`, otherwise it will be an empty string if
-    everything is ok.
-
-- **amount\_to\_units($amount)**
+- **amount\_to\_units($amount)\[, $want\_bits\]**
 
     Converts the amount given in `$amount` into units. An amount takes the form as
     described by `'R:amount'` or `'R:amount_data'` and is either a number
     optionally followed K, M, G, or T, or a number followed by KB, Kb, KiB, Kib up
     to up to TB etc respectively. For the data amounts B and b refer to bytes and
-    bits, whilst KiB and KB refer to 1024 bytes and 1000 bytes and so on.
+    bits, whilst KiB and KB refer to 1024 bytes and 1000 bytes and so on. If
+    `$want_bits` is set to true then the returned amount is in bits rather than
+    bytes. The default default is false and it only applies to amounts of data.
+
+- **check($data, $name)**
+
+    Checks the specified structure making sure that the domain specific syntax is
+    ok.
+
+    `$data` is a reference to the data structure that is to be checked, typically a
+    hash, i.e. a record, but it can also be a list. `$name` is a string containing
+    a descriptive name for the data structure being checked. This will be used as
+    the base name in any error messages returned by this method.
 
 - **debug(\[$flag\])**
 
@@ -92,12 +109,9 @@ supports ini style configuration files, is [Config::Validator](https://metacpan.
     otherwise debug messages are turned off. If `$flag` isn't specified then
     nothing changes.
 
-- **duration\_to\_milliseconds($duration)**
-
-    Converts the time duration given in `$duration` into milliseconds. A duration
-    takes the form as described by `'R:duration_milliseconds'` and is a number
-    followed by a time unit that can be one of ms, s, m, h, d, or w for
-    milliseconds, seconds, minutes, hours, days and weeks respectively.
+    The any new debug setting is either changed globally, which will affect all
+    newly created objects, or just changed within the current object, depending upon
+    whether this method is called as a class or an instance method.
 
 - **duration\_to\_seconds($duration)**
 
@@ -107,18 +121,23 @@ supports ini style configuration files, is [Config::Validator](https://metacpan.
 
 - **match\_syntax\_value($syntax, $value\[, $error\])**
 
-    Tests the data in `$value` against an item in the syntax tree as given by
-    `$syntax`. `$error` is an optional reference to a string that is to contain
-    any type/value errors that are detected.
+    Tests the data in `$value` against a syntax pattern as given by `$syntax`. A
+    syntax pattern is something like `'R:hostname'` or `'i:1,10'`. `$error` is an
+    optional reference to a string that is to contain any type/value errors that are
+    detected.
 
 - **register\_syntax\_regex($name, $regex)**
 
     Registers the regular expression string `$regex`, which is not a compiled RE
     object, as a syntax pattern under the name given in `$name`. This is then
-    available for use as `'R:<Name`' just like the built in syntax patterns. This
+    available for use as `'R:name'` just like the built in syntax patterns. This
     can be used to replace any built in pattern or extend the list of patterns. The
-    regular expression must be anchored, i.e. start and end with ^ and $
+    regular expression must be anchored, i.e. start and end with `^` and `$`
     respectively.
+
+    The new regular expression term either goes into the global default table, which
+    will affect newly created objects, or the object's own private table, depending
+    upon whether this method is called as a class or an instance method.
 
 - **string\_to\_boolean($string)**
 
@@ -126,32 +145,33 @@ supports ini style configuration files, is [Config::Validator](https://metacpan.
     representing a boolean takes the form as described by `'R:boolean'` and can be
     one of true, yes, Y, y, or on for true and false, no N, n, off or '' for false.
 
+- **syntax\_tree($syntax\_tree)**
+
+    Sets the object's syntax tree reference to the one given in `$syntax_tree`.
+
 # RETURN VALUES
 
-`verify()` returns nothing. `amount_to_units()` returns an integer. `debug()`
-returns the previous debug message setting as a boolean.
-`duration_to_milliseconds()` and `duration_to_seconds()` returns the number of
-milliseconds and seconds that the specified duration represents respectively.
-`match_syntax_value()` returns true for a match, otherwise false for no
-match. `register_syntax_regex()` returns nothing. Lastly `string_to_boolean()`
-returns a boolean.
+`new()` returns a new Config::Verifier object.
+
+`amount_to_units()` returns an integer.
+
+`check()` returns a string containing the details of the problems encountered
+when parsing the data on failure, otherwise an empty string on success.
+
+`debug()` returns the previous debug message setting as a boolean.
+
+`duration_to_seconds()` returns the number of seconds that the specified
+duration represents.
+
+`match_syntax_value()` returns true for a match, otherwise false for no match.
+
+`register_syntax_regex()` returns nothing.
+
+`string_to_boolean()` returns a boolean.
+
+`syntax_tree()` returns nothing.
 
 # NOTES
-
-## Import Tags
-
-- **:common\_routines**
-
-    When this import tag is used the following routines are imported into the
-    calling name space:
-
-        amount_to_units
-        duration_to_milliseconds
-        duration_to_seconds
-        match_syntax_value
-        register_syntax_regex
-        string_to_boolean
-        verify
 
 ## Syntax Patterns
 
@@ -166,19 +186,23 @@ The built in registered ones are:
     R:amount_data
     R:anything
     R:boolean
-    R:duration_milliseconds
-    R:duration_seconds
-    R:float
+    R:duration
+    R:hostname
+    R:ipv4_addr
+    R:ipv4_cidr
+    R:ipv6_addr
+    R:ipv6_cidr
     R:name
-    R:path
     R:plugin
     R:printable
     R:string
+    R:unix_path
     R:user_name
     R:variable
+    R:windows_path
 
-One can add to the built in list or replace existing entries by using
-`register_syntax_regex()`.
+One can add to the built in list or replace existing entries by using the
+`register_syntax_regex()` method.
 
 ## Syntax Trees
 
@@ -191,23 +215,44 @@ followed by a colon and then the field name. Key and value types are as follows:
 
     c:      - Custom entries follow, i.e. a key lookup failure isn't an
               error. This is used to cater for parts of a syntax tree that
-              need to be dynamic and need to be handled separately.
+              need to be dynamic and handled separately.
     f:m,M   - A floating point number with optional minimum and Maximum
               qualifiers.
     i:m,M,s - An integer with optional minimum, Maximum and step qualifiers.
-    m:s     - A plain string literal s, invariably representing the name of
-              a mandatory field, which is case sensitive.
+    l:type  - The type of list in the syntax tree. This determines how lists
+              are treated. There are two types choice_list, the default, and
+              choice_value:
+              choice_list:  With this type a list is expected in the data,
+                            with each element of the syntax list
+                            representing one of the allowed types that an
+                            entry can take within the data list.
+              choice_value: With this type a singular item is expected in
+                            the data, with each element of the syntax list
+                            representing one of the allowed types that the
+                            data item can be. Having said that, should a
+                            list or record be specified in the syntax list
+                            then this permits the singular data item to also
+                            be a list or record. Thus you could use this
+                            type of list to have a field that could take a
+                            scalar value, a list or a record.
+              Each type can also take an additional allow_empty_list
+              qualifier (separated by a comma). This permits the list to be
+              empty in the data. The default is to treat an empty list as an
+              error.
+    m:s     - A plain string literal s, representing the name of a mandatory
+              field, which is case sensitive.
     R:n     - A built in regular expression with the name n, that is used to
               match against acceptable values. This can also be used to
               match against optional fields that fit that pattern.
     r:reg   - Like R:n but the regular expression is supplied by the caller.
-    s:s     - A plain string literal s, typically representing the the name
-              of an optional field, which is case sensitive.
+    s:s     - A plain string literal s, representing the the name
+              of an optional field or a literal value, both or which are
+              which are case sensitive.
     t:s     - Like m: but also signifies a typed field, i.e. a field that
               uniquely identifies the type of the record via its value. Its
               corresponding value must uniquely identify the type of record
               within the list of records at that point in the schema.
-    Arrays  - These represent not only that a list of items should be
+    Lists   - These represent not only that a list of items should be
               present but also that there can be a choice in the different
               types of items, e.g scalar, list or hash.
     Hashes  - These represent records with named fields.
@@ -220,10 +265,19 @@ Please see the example under ["SYNOPSIS"](#synopsis).
 
 # DIAGNOSTICS
 
-One can generate loads of tracing messages to `STDERR` when debug mode is
-turned on via the `debug()` function.
+One can generate lots of tracing messages to `STDERR` when debug mode is turned
+on via the `debug()` method.
 
-Exceptions are thrown when there is a problem with the supplied syntax tree.
+With the exception of the `debug()` and `string_to_boolean()` methods,
+exceptions are thrown when there is a problem with the supplied syntax tree or
+value. Since illegal values read in from configuration data will be detected
+when it is parsed, exceptions from these methods will most likely indicate a
+fault with the calling program. Exceptions from this library are
+`Config::Verifier::Exception` objects that can be cast to strings.
+
+Problems with the data being parsed are returned as a string from the `check()`
+method. Where possible all parsing errors will be listed, one line per error, in
+a form suitable for the end user.
 
 # DEPENDENCIES
 
@@ -238,10 +292,10 @@ None beyond the core Perl modules.
 
 # BUGS AND LIMITATIONS
 
-This module is certainly not exhaustive and doesn't contain support for parsing
-non-Linux related items, although that would be trivial to add. Also not
-everything can be checked. Maybe a future enhancement could be to have a code
-reference mechanism whereby code snippets could be included in the syntax tree.
+Whilst this module could be used to validate data conforming to a schema it's
+really designed for checking configuration data. If used in high data rate
+communications you will probably find other libraries better able to support
+standard schema definitions and possibly in a more performant way.
 
 # AUTHOR
 

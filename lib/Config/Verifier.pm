@@ -1539,19 +1539,17 @@ Config::Verifier - Verify the structure and values inside Perl data structures
             'R:ipv4_cidr',
             'R:ipv6_addr',
             'R:ipv6_cidr'],
-
-            SYNTAX_CIDR4],
        's:denied_hosts'  =>
            ['R:hostname',
             'R:ipv4_addr',
             'R:ipv4_cidr',
             'R:ipv6_addr',
             'R:ipv6_cidr']);
-  my $data = YAML::XS::LoadFile("my-config.yml");
+  my $data = YAML::XS::LoadFile('my-config.yml');
   my $verifier = Config::Verifier->new(\%settings_syntax_tree);
   my $status = $verifier->check($data);
   die("Syntax error detected. The reason given was:\n" . $status)
-      if ($status ne "");
+      if ($status ne '');
 
 =head1 DESCRIPTION
 
@@ -1618,6 +1616,10 @@ the base name in any error messages returned by this method.
 Turns on the output of debug messages to C<STDERR> when C<$flag> is set to true,
 otherwise debug messages are turned off. If C<$flag> isn't specified then
 nothing changes.
+
+The any new debug setting is either changed globally, which will affect all
+newly created objects, or just changed within the current object, depending upon
+whether this method is called as a class or an instance method.
 
 =item B<duration_to_seconds($duration)>
 
@@ -1773,8 +1775,8 @@ Please see the example under L</SYNOPSIS>.
 
 =head1 DIAGNOSTICS
 
-One can generate loads of tracing messages to C<STDERR> when debug mode is
-turned on via the C<debug()> method.
+One can generate lots of tracing messages to C<STDERR> when debug mode is turned
+on via the C<debug()> method.
 
 With the exception of the C<debug()> and C<string_to_boolean()> methods,
 exceptions are thrown when there is a problem with the supplied syntax tree or
@@ -1800,10 +1802,10 @@ L<YAML::XS>
 
 =head1 BUGS AND LIMITATIONS
 
-This module is certainly not exhaustive and doesn't contain support for parsing
-non-Linux related items, although that would be trivial to add. Also not
-everything can be checked. Maybe a future enhancement could be to have a code
-reference mechanism whereby code snippets could be included in the syntax tree.
+Whilst this module could be used to validate data conforming to a schema it's
+really designed for checking configuration data. If used in high data rate
+communications you will probably find other libraries better able to support
+standard schema definitions and possibly in a more performant way.
 
 =head1 AUTHOR
 
