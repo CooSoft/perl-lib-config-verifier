@@ -160,16 +160,28 @@ sub syntax_tree($self, $syntax_tree)
 
 # Public instance and class methods.
 
+sub debug($self, $value = undef)
+{
+    my $old_value;
+    my $this =
+        (ref($self) ne '') ? $Class_Objects{$self->{$Class_Name}} : undef;
+    if (defined($this))
+    {
+        $old_value = $this->{debug};
+        $this->{debug} = $value if (defined($value));
+    }
+    else
+    {
+        $old_value = $Debug;
+        $Debug = $value if (defined($value));
+    }
+    return $old_value;
+}
 sub register_syntax_regex;
 
 # Public class methods.
 
 sub amount_to_units;
-sub debug($, $value = undef)
-{
-    $Debug = $value if (defined($value));
-    return $Debug;
-}
 sub duration_to_seconds;
 sub string_to_boolean($, $value)
 {
@@ -206,7 +218,8 @@ sub new($class, $syntax_tree = {})
 
     my %sregexes_copy = %Syntax_Regexes;
     $this = {syntax_tree    => $syntax_tree,
-             syntax_regexes => \%sregexes_copy};
+             syntax_regexes => \%sregexes_copy,
+             debug          => $Debug};
 
     # Now we have an initialised internal object, check the specified syntax
     # tree for errors.
@@ -434,7 +447,7 @@ sub check_syntax_tree($this, $syntax)
             if (ref($syn_el) eq '')
             {
                 logger('Checking syntax tree element `%s\'.', $syn_el)
-                    if ($Debug);
+                    if ($this->{debug});
                 match_syntax($this, $syn_el);
             }
             else
@@ -577,7 +590,7 @@ sub verify_arrays($this, $data, $syntax, $path, $status)
                            $i,
                            $data->[$i],
                            $syn_el)
-                        if ($Debug);
+                        if ($this->{debug});
                     my $err = '';
                     if (match_syntax($this, $syn_el, $data->[$i], \$err))
                     {
@@ -622,7 +635,7 @@ sub verify_arrays($this, $data, $syntax, $path, $status)
                     logger('Comparing `%s->[%u]:(ARRAY)\' against `(ARRAY)\'.',
                            $path,
                            $i)
-                        if ($Debug);
+                        if ($this->{debug});
                     $local_status = '';
                     verify_node($this,
                                 $data->[$i],
@@ -847,7 +860,7 @@ sub verify_hashes($this, $data, $syntax, $path, $status)
                $field,
                ($field_type eq '') ? $data->{$field} : '(' . $field_type . ')',
                ($syntax_type eq '') ? $syn_el : '(' . $syntax_type . ')')
-            if ($Debug);
+            if ($this->{debug});
 
         # Scalar - scalar.
 
@@ -1044,7 +1057,7 @@ sub take_singular_hash_path($this, $data, $syntax, $path, $status, $i)
                    $i,
                    join('|', keys(%{$data->[$i]})),
                    join('|', keys(%$syn_el)))
-                if ($Debug);
+                if ($this->{debug});
             verify_node($this,
                         $data->[$i],
                         $syn_el,
@@ -1109,7 +1122,7 @@ sub take_typed_hashes_path($this, $data, $syntax, $path, $status, $i)
                        join('|', keys(%{$data->[$i]})),
                        join('|', keys(%$syn_el)),
                        $data_key)
-                    if ($Debug);
+                    if ($this->{debug});
                 verify_node($this,
                             $data->[$i],
                             $syn_el,
@@ -1167,7 +1180,7 @@ sub take_single_field_hashes_path($this, $data, $syntax, $path, $status, $i)
                        $i,
                        $data_key,
                        $syn_key)
-                    if ($Debug);
+                    if ($this->{debug});
                 verify_node($this,
                             $data->[$i],
                             $syn_el,
@@ -1375,7 +1388,7 @@ sub match_syntax($this, $syntax, $value = {}, $error_text = undef)
            $syntax,
            $value,
            ($result) ? 'Yes' : 'No')
-        if ($Debug and defined($value));
+        if ($this->{debug} and defined($value));
 
     return $result;
 
