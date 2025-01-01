@@ -144,7 +144,7 @@ like($status,
                                           port => 5901}}});
 $status = $verifier->check(\%data, 'settings');
 like($status,
-     qr/The settings->menu field is not an array/,
+     qr/The settings->menu field is not a list/,
      'Bad hash container correctly detected');
 
 # Good syntax tree, wrong container (array instead of a hash).
@@ -164,7 +164,7 @@ like($status,
      menu           => 'wrong');
 $status = $verifier->check(\%data, 'settings');
 like($status,
-     qr/\QThe settings->menu field is not an array\E/,
+     qr/\QThe settings->menu field is not a list\E/,
      'Missing array container correctly detected');
 
 # Good syntax tree, container instead of scalar.
@@ -328,6 +328,35 @@ is($status, '', 'Many multi-field records of the same type correctly detected');
 $status = $verifier->check(\%data, 'settings');
 is($status, '', 'Many diferent forms of host values correctly detected');
 
+# A syntax tree that contains no explicitly typed records and bad data that
+# contains an explicitly typed record.
+
+%syntax_tree =
+    ('m:config_version' => 'f:0',
+     'm:menu'           =>
+         [{'m:ssh'         =>
+               {'m:name'   => 'R:printable',
+                'm:host'   => \@host,
+                's:user'   => 'R:user_name'}},
+          {'m:telnet'      =>
+               {'m:name'   => 'R:printable',
+                'm:host'   => \@host,
+                's:user'   => 'R:user_name'}}]);
+$verifier->syntax_tree(\%syntax_tree);
+%data =
+    (config_version => 1.0,
+     menu           => [{ssh  =>
+                             {name => 'Desktop',
+                              host => 'desktop.acme.co.uk'}},
+                        {type => 'bad',
+                         name => 'duff'}]);
+$verifier->syntax_tree(\%syntax_tree);
+$status = $verifier->check(\%data, 'settings');
+like($status,
+     qr/^\QUnexpected multi-field record that is either untyped or an \E
+        \Qunrecognised type found at settings->menu->[1].\E$/x,
+     'Bad field value correctly detected');
+
 # A bad syntax tree that has too many untyped records in a list.
 
 %syntax_tree =
@@ -346,6 +375,76 @@ exception_protect(sub { $verifier->syntax_tree(\%syntax_tree); });
 like($exception,
      qr/^Illegal syntax.+\(untyped records must be the only record in a list\)/,
      'Multiple untyped records correctly detected');
+
+# A bad syntax tree that has too many typed fields in a record.
+
+%syntax_tree =
+    ('m:config_version' => 'f:0',
+     'm:menu'           =>
+         ['R:printable',
+          {'t:type' => 's:rdp',
+           't:name' => 'R:printable',
+           'm:host' => \@host,
+           's:user' => 'R:user_name'}]);
+exception_protect(sub { $verifier->syntax_tree(\%syntax_tree); });
+like($exception,
+     qr/^\QIllegal syntax element found in syntax tree (only one typed field \E
+        \Qcan be present in a record).\E/x,
+     'Type record with multiple typed fields correctly detected');
+
+# A bad syntax tree that has a custom field as a single field in a record.
+
+%syntax_tree =
+    ('m:config_version' => 'f:0',
+     'm:menu'           =>
+         ['R:printable',
+          {'c:' => {'m:type' => 's:rdp',
+                    't:name' => 'R:printable',
+                     'm:host' => \@host,
+                     's:user' => 'R:user_name'}}]);
+exception_protect(sub { $verifier->syntax_tree(\%syntax_tree); });
+like($exception,
+     qr/^\QIllegal syntax element found in syntax tree (record type fields \E
+        \Qcannot be of type `c:').\E/x,
+     'Single key record using a custom entry correctly detected');
+
+# A good syntax tree that has a custom field in a record.
+
+%syntax_tree =
+    ('m:config_version' => 'f:0',
+     'm:menu'           =>
+         ['R:printable',
+          {'t:type' => 's:rdp',
+           'm:name' => 'R:printable',
+           'm:host' => \@host,
+           's:user' => 'R:user_name',
+           'c:'     => 'c:'}]);
+$verifier->syntax_tree(\%syntax_tree);
+%data =
+    (config_version => 1.0,
+     menu           => [{type    => 'rdp',
+                         name    => 'Desktop',
+                         host    => 'desktop.acme.co.uk',
+                         flubber => 'random garbage'}]);
+$status = $verifier->check(\%data, 'settings');
+is($status, '', 'Custom fields correctly detected');
+
+# A bad syntax tree with a named custom field.
+
+%syntax_tree =
+    ('m:config_version' => 'f:0',
+     'm:menu'           =>
+         ['R:printable',
+          {'t:type'    => 's:rdp',
+           'm:name'    => 'R:printable',
+           'm:host'    => \@host,
+           's:user'    => 'R:user_name',
+           'c:flubber' => 'c:'}]);
+exception_protect(sub { $verifier->syntax_tree(\%syntax_tree); });
+like($exception,
+     qr/^\QIllegal syntax element found in syntax tree (syntax = `c:flubber', \E
+        \Qcustom field entries have no name).\E/x,
+     'Named custom field correctly detected');
 
 # A syntax tree that has hosts entries that can contain a scalar value, a list
 # or a record.
@@ -478,15 +577,232 @@ is($status, '', 'Empty list is correctly allowed');
                         {ssh    =>
                              {name  => 'Desktop',
                               hosts => {hostname   => 'desktop.acme.co.uk',
-                                        ip_address => '192.168.1.24'}}},
-                        {telnet =>
-                             {name  => 'Desktop',
-                              hosts => {hostname   => 'fileserver.acme.co.uk',
-                                        ip_address => '192.168.1.22'}}}]);
+                                        ip_address => '192.168.1.24'}}}]);
 $status = $verifier->check(\%data, 'settings');
 like($status,
-     qr/^\QEmpty array found at settings->options. This is not allowed.\E$/,
+     qr/^\QEmpty list found at settings->options. This is not allowed.\E$/,
      'Bad hosts field entries correctly detected');
+
+# Good syntax tree, bad typed field value.
+
+my $object = bless({}, 'TheUnexpectedClass');
+%data =
+    (config_version => 1.0,
+     menu           => [{type   => 'rdps',
+                         name   => 'Desktop',
+                         hosts  => ['desktop.acme.co.uk', 'server.acme.co.uk']},
+                        {ssh    =>
+                             {name  => 'Desktop',
+                              hosts => {hostname   => 'desktop.acme.co.uk',
+                                        ip_address => '192.168.1.24'}}}]);
+$status = $verifier->check(\%data, 'settings');
+like($status,
+     qr/^\QUnexpected multi-field record that is either untyped or an \E
+        \Qunrecognised type found at settings->menu->[0].\E$/x,
+     'Bad type field value correctly detected');
+%data =
+    (config_version => 1.0,
+     menu           => [{type   => $object,
+                         name   => 'Desktop',
+                         hosts  => ['desktop.acme.co.uk', 'server.acme.co.uk']},
+                        {ssh    =>
+                             {name  => 'Desktop',
+                              hosts => {hostname   => 'desktop.acme.co.uk',
+                                        ip_address => '192.168.1.24'}}}]);
+$status = $verifier->check(\%data, 'settings');
+like($status,
+     qr/^\QUnexpected multi-field record that is either untyped or an \E
+        \Qunrecognised type found at settings->menu->[0].\E$/x,
+     'Bad type field value correctly detected');
+
+# Good syntax tree, bad array value (unrecognised reference type).
+
+%data =
+    (config_version => 1.0,
+     menu           => [$object,
+                        {ssh    =>
+                             {name  => 'Desktop',
+                              hosts => {hostname   => 'desktop.acme.co.uk',
+                                        ip_address => '192.168.1.24'}}}]);
+$status = $verifier->check(\%data, 'settings');
+like($status,
+     qr/^\QUnsupported data type `TheUnexpectedClass' found at \E
+        \Qsettings->menu->[0].\E$/x,
+     'Bad data type correctly detected');
+
+# Good syntax tree, bad single key typed record.
+
+%syntax_tree =
+    ('m:config_version' => 'f:0',
+     'm:menu'           =>
+         [{'t:type'        => 's:rdp',
+           'm:name'        => 'R:printable',
+           'm:host'        => \@host,
+           's:user'        => 'R:user_name',
+           's:domain_name' => 'R:hostname'},
+          {'t:type'        => 's:vnc',
+           'm:name'        => 'R:printable',
+           'm:host'        => \@host}]);
+$verifier->syntax_tree(\%syntax_tree);
+%data =
+    (config_version => 1.0,
+     menu           => [{ssh    =>
+                             {name  => 'Desktop',
+                              hosts => {hostname   => 'desktop.acme.co.uk',
+                                        ip_address => '192.168.1.24'}}}]);
+$status = $verifier->check(\%data, 'settings');
+like($status,
+     qr/^\QUnexpected single type field record with a type name of `ssh' \E
+        \Qfound at settings->menu->[0].\E$/x,
+     'Bad single type field record correctly detected');
+
+# Good syntax tree, bad array in array.
+
+%data =
+    (config_version => 1.0,
+     menu           => [['hello'],
+                        {ssh    =>
+                             {name  => 'Desktop',
+                              hosts => {hostname   => 'desktop.acme.co.uk',
+                                        ip_address => '192.168.1.24'}}}]);
+$status = $verifier->check(\%data, 'settings');
+like($status,
+     qr/^\QUnexpected list found at settings->menu->[0].\E/x,
+     'Bad nested array record correctly detected');
+
+# Good syntax tree, bad lone array.
+
+my @data =
+    ('Hello',
+     'world');
+$status = $verifier->check(\@data, 'settings');
+like($status,
+     qr/^\QThe settings field is not a record.\E$/,
+     'Bad lone array correctly detected');
+
+# Good syntax tree, bad lone record.
+
+my @syntax_tree =
+    ('R:hostname',
+     'R:printable');
+$verifier->syntax_tree(\@syntax_tree);
+$status = $verifier->check(\%data, 'settings');
+like($status,
+     qr/^\QThe settings field is not a list.\E$/,
+     'Bad lone record correctly detected');
+
+# Good syntax tree, bad scalar value record.
+
+@syntax_tree =
+    ('i:',
+     'f:',
+     ['R:printable']);
+$verifier->syntax_tree(\@syntax_tree);
+@data =
+    ('Hello',
+     'world',
+     undef);
+$status = $verifier->check(\@data, 'settings');
+like($status,
+     qr/^(?:\QUnexpected value \E\S+\Q found at settings->[\E\d\Q]. It either \E
+          \Qdoesn't match the expected value format (integer between <No \E
+          \QLower Limit> and <No Upper Limit> or float between <No Lower \E
+          \QLimit> and <No Upper Limit>), or a list or record was expected \E
+          \Qinstead.\E.+?){2}
+         \QUnexpected undefined value found at settings->[2]. It either \E
+         \Qdoesn't match the expected value format, or a list or record was \E
+         \Qexpected instead.\E$/sx,
+     'Bad scalar values correctly detected');
+
+# A bad syntax tree that has unsupported references in it.
+
+%syntax_tree =
+    ('m:config_version' => 'f:0',
+     'm:menu'           => [*STDIN]);
+exception_protect(sub { $verifier->syntax_tree(\%syntax_tree); });
+like($exception,
+     qr/^Illegal syntax element found in syntax tree \(syntax .+STDIN'\)/,
+     'Illegal reference types correctly detected');
+%syntax_tree =
+    ('m:config_version' => 'f:0',
+     'm:menu'           => $object);
+exception_protect(sub { $verifier->syntax_tree(\%syntax_tree); });
+like($exception,
+     qr/^Syntax tree has unsupported element of type `TheUnexpectedClass'\./,
+     'Illegal reference types correctly detected');
+
+# Good syntax tree, records typed on single generic keys.
+
+%syntax_tree =
+    ('m:config_version' => 'f:0',
+     'm:groups'           =>
+         [{'m:name'       => 'R:printable',
+           'm:users'      => ['R:user_name'],
+           's:details'    => [{'R:user_name'  =>
+                                   {'m:first_name' => 'R:printable',
+                                    'm:last_name'  => 'R:printable',
+                                    's:comments'   => 'R:printable'}}]}]);
+$verifier->syntax_tree(\%syntax_tree);
+%data =
+    (config_version => 1.0,
+     groups         => [{name    => 'admins',
+                         users   => ['root', 'system'],
+                         details =>
+                             [{'root'   => {first_name => 'root',
+                                            last_name  => 'N/A',
+                                            comments   => 'Root user'}},
+                              {'system' => {first_name => 'System',
+                                            last_name  => 'Administrator',
+                                            comments   => 'My account'}}]}]);
+$status = $verifier->check(\%data, 'settings');
+is($status, '', 'Empty list is correctly allowed');
+
+# A bad syntax trees that has undef entries.
+
+%syntax_tree =
+    ('m:config_version' => 'f:0',
+     'm:menu'           =>
+         ['R:printable',
+          {'t:type' => 's:rdp',
+           'm:name' => 'R:printable',
+           'm:host' => \@host,
+           's:user' => 'R:user_name',
+           'c:'     => undef}]);
+exception_protect(sub { $verifier->syntax_tree(\%syntax_tree); });
+like($exception,
+     qr/^\QIllegal syntax element found in syntax tree (syntax = `undef').\E/,
+     'Illegal undefined syntax elements correctly detected');
+%syntax_tree =
+    ('m:config_version' => 'f:0',
+     'm:menu'           =>
+         ['R:printable',
+          {'t:type' => 's:rdp',
+           'm:name' => 'R:printable',
+           'm:host' => \@host,
+           's:user' => 'R:user_name',
+           undef    => 'c:'}]);
+exception_protect(sub { $verifier->syntax_tree(\%syntax_tree); });
+like($exception,
+     qr/^\QIllegal syntax element found in syntax tree (syntax = `undef').\E/,
+     'Illegal undefined syntax elements correctly detected');
+
+# Bad syntax tree that has a bad list type.
+
+%syntax_tree =
+    ('m:config_version' => 'f:0',
+     'm:menu'           =>
+         ['l:mylist',
+          'R:printable',
+          {'t:type'    => 's:rdp',
+           'm:name'    => 'R:printable',
+           'm:host'    => \@host,
+           's:user'    => 'R:user_name'}]);
+exception_protect(sub { $verifier->syntax_tree(\%syntax_tree); });
+like($exception,
+     qr/^\QIllegal syntax element found in syntax tree (syntax = `l:mylist', \E
+        \Qtype of list is must be `choice_list' or `choice_value' optionally \E
+        \Qfollowed by `,allow_empty_list').\E/x,
+     'Unknown list type correctly detected');
 
 done_testing();
 

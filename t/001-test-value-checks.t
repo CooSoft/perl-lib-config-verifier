@@ -18,17 +18,17 @@ sub test_values($good,
     $verifier->syntax_tree({'m:value' => $syntax});
     for my $value (@$values)
     {
-        print("$value\n");
         my $data = {value => $value};
         my $path = 'Top';
         my $status = $verifier->check($data, $path);
+        my $printable = defined($value) ? $value : 'Undefined';
         if ($good)
         {
-            is($status, '', "Good $type check [$value]");
+            is($status, '', "Good $type check [$printable]");
         }
         else
         {
-            isnt($status, '', "Bad $type check [$value]");
+            isnt($status, '', "Bad $type check [$printable]");
         }
     }
 
@@ -108,7 +108,7 @@ test_values(1, 'integer step', 'i:10,100000000,2', \@good);
 test_values(0, 'integer step', 'i:-1000,-2,2', \@bad);
 @bad = ('i: 10,20', 'i:10,20 ', ' i:10,20', 'i:10,20 ', 'i:10, 20', 'i:++10,20',
         'i:23,--123', 'i:1-4,10.5e5', 'i:14,10.5e5', 'i:1,2,3,4', 'i:10,5',
-        'i:10,20,3');
+        'i:10,20,3', 'i:5,17,5', 'i:6,15,5');
 foreach my $range (@bad)
 {
     exception_protect(sub { return test_values(1,
@@ -139,9 +139,10 @@ test_values(0, 'amount_data', 'R:amount_data', \@bad);
 
 # Check booleans.
 
-@good = ('true', 'yes', 'Y', 'y', 'on', '1', 'false', 'no', 'N', 'n', 'off',
-         '0', '');
-@bad = ('freddy', '2', 'x', ' true', 'TRUE', 'false ', '^', '$', '_', '-', ' ',
+@good = ('true', 'True', 'TRUE', 'yes', 'Yes', 'YES', 'Y', 'y', 'on', 'On',
+         'ON', '1', 'false', 'False', 'FALSE', 'no', 'No', 'NO', 'N', 'n',
+         'off', 'Off', 'OFF', '0', '');
+@bad = ('freddy', '2', 'x', ' true', 'false ', '^', '$', '_', '-', ' ', undef,
         '.');
 test_values(1, 'booleans', 'R:boolean', \@good);
 test_values(0, 'booleans', 'R:boolean', \@bad);
@@ -201,12 +202,21 @@ test_values(0, 'IPv6 addresses', 'R:ipv6_addr', \@bad);
 test_values(1, 'IPv6 CIDR', 'R:ipv6_cidr', \@good);
 test_values(0, 'IPv6 CIDR', 'R:ipv6_cidr', \@bad);
 
-# Check path.
+# Check unix path.
 
 @good = ('/home/fbloggs/.local/bin', '../wall-papers', '~/Test Reports');
 @bad = ("/bin\000/null", '/home\/notallowed');
 test_values(1, 'Unix path', 'R:unix_path', \@good);
 test_values(0, 'Unix path', 'R:unix_path', \@bad);
+
+# Check windows path.
+
+@good = ('\home\fbloggs\.local\bin', '..\wall-papers', 'c:\Test Reports',
+         'D:results-json', 'cv.doc', 'Documents\manual.pdf',
+         '\\\\server.acme.co.uk\Users\fbloggs\Documents\manual.pdf');
+@bad = ("/bin\000/null", '/home\/notallowed', '\home/fbloggs\.local', 'dfdf<sd>sdsd', '\\\\server.acme.co.uk\\');
+test_values(1, 'Windows path', 'R:windows_path', \@good);
+test_values(0, 'Windows path', 'R:windows_path', \@bad);
 
 # Check user name.
 
@@ -318,6 +328,8 @@ foreach my $i (({in  => '100b',
 }
 foreach my $i (({in  => '100B',
                  out => 800},
+                {in  => '1024b',
+                 out => 1024},
                 {in  => '100KiB',
                  out => 819_200}))
 {
@@ -351,6 +363,55 @@ foreach my $i (' 100', ' 100K', '100K ', '--10'. '++10', '-10-', '+10+', '^',
     like($exception,
          qr/^Invalid duration .+ detected./,
          "duration_to_seconds [$i]");
+}
+
+# Check individual syntax element checks.
+
+Config::Verifier->debug(1);
+Config::Verifier->debug(not Config::Verifier->debug());
+$verifier = Config::Verifier->new();
+$verifier->debug(1);
+$result = $verifier->match_syntax_value('R:hostname', 'server.acme.co.uk');
+$verifier->debug(not $verifier->debug());
+ok($result, 'Good syntax element check [server.acme.co.uk]');
+$result = $verifier->match_syntax_value('r:^[a-z.]+$', 'server.acme.co.uk');
+ok($result, 'Good syntax element check [server.acme.co.uk]');
+exception_protect
+    (sub { return $verifier->match_syntax_value('r:^[a-z.]+',
+                                                'server.acme.co.uk'); });
+like($exception,
+     qr/is not anchored to the start and end of the string./,
+     'Unanchored `r:\' style regex correctly detected');
+exception_protect
+    (sub { return $verifier->match_syntax_value('r:^[a-z.+$',
+                                                'server.acme.co.uk'); });
+like($exception,
+     qr/^Unmatched \[ in regex/,
+     'Bad `r:\' style regex correctly detected');
+exception_protect
+    (sub { return $verifier->match_syntax_value('R:flubber',
+                                                'server.acme.co.uk'); });
+like($exception,
+     qr/^\QIllegal syntax element found in syntax tree (syntax = `R:flubber', \E
+        \Qunknown syntactic regular expression).\E/x,
+     'Unknown predefined regex correctly detected');
+$result = $verifier->match_syntax_value('R:hostname', '192.168.1.1');
+ok((not $result), 'Failed syntax element check [192.168.1.1]');
+$result = $verifier->match_syntax_value('r:^[a-zA-Z.]+$', '192.168.1.1');
+ok((not $result), 'Failed syntax element check [192.168.1.1]');
+$verifier = undef;
+
+# Check boolean conversions.
+
+foreach my $i ('true', 'True', 'TRUE', 'yes', 'Yes', 'YES', 'Y', 'y', 'on',
+               'On', 'ON', '1')
+{
+    ok(Config::Verifier->string_to_boolean($i), "string_to_boolean [$i]");
+}
+foreach my $i ('false', 'False', 'FALSE', 'no', 'No', 'NO', 'N', 'n', 'off',
+               'Off', 'OFF', '0', '')
+{
+    ok((not Config::Verifier->string_to_boolean($i)), "string_to_boolean [$i]");
 }
 
 done_testing();
