@@ -568,6 +568,8 @@ sub verify_node($this, $data, $syntax, $path, $status)
 sub verify_arrays($this, $data, $syntax, $path, $status)
 {
 
+    my $hash_state;
+
     # Scan through the array looking for a match based upon scalar values and
     # container types.
 
@@ -668,10 +670,12 @@ sub verify_arrays($this, $data, $syntax, $path, $status)
         elsif ($data_type eq 'HASH')
         {
 
-            # First determine what type of hashes we have in the syntax array
-            # (just one or multiple that are typed in some way).
+            # If we haven't done it already, determine what type of hashes we
+            # have in the syntax array (just one or multiple that are typed in
+            # some way).
 
-            my $hash_state = check_hashes_in_array($syntax);
+            $hash_state = check_hashes_in_array($syntax)
+                unless (defined($hash_state));
 
             # If there is one hash in the syntax array then that's our path.
 
