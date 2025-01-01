@@ -7,6 +7,7 @@ allow_if_string_contains_single_quote = 1
 
 [-BuiltinFunctions::RequireBlockGrep]
 [-CodeLayout::ProhibitParensWithBuiltins]
+[-CodeLayout::RequireTidyCode]
 [-CodeLayout::RequireTrailingCommas]
 [-ControlStructures::ProhibitCascadingIfElse]
 [-ControlStructures::ProhibitDeepNests]
@@ -17,6 +18,7 @@ allow_if_string_contains_single_quote = 1
 [-RegularExpressions::RequireDotMatchAnything]
 [-RegularExpressions::RequireExtendedFormatting]
 [-RegularExpressions::RequireLineBoundaryMatching]
+[-Subroutines::ProhibitManyArgs]
 [-Subroutines::RequireArgUnpacking]
 [-TooMuchCode::ProhibitDuplicateLiteral]
 [-ValuesAndExpressions::ProhibitConstantPragma]
