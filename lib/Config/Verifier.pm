@@ -100,7 +100,7 @@ my %Syntax_Regexes =
      plugin                => qr/^[-_.[:alnum:]]+$/,
      printable             => qr/^[[:print:]]+$/,
      string                => qr/^[-_. [:alnum:]]+$/,
-     unix_path             => qr/^(?:(?!\\\/|\000).)+$/,
+     unix_path             => qr/^(?:(?!.*\\\/|.*\000).)+$/,
      user_name             => qr/^[-_[:alnum:]]+[-_ [:alnum:]]+[-_[:alnum:]]+$/,
      variable              => qr/^[[:alpha:]_][[:alnum:]_]+$/);
 
