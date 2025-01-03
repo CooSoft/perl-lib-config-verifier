@@ -36,6 +36,7 @@ use warnings;
 
 use IO::Handle;
 use POSIX qw(:limits_h);
+use Scalar::Util qw(refaddr);
 
 # ***** GLOBAL DATA DECLARATIONS *****
 
@@ -422,13 +423,22 @@ sub register_syntax_regex($self, $name, $regex)
 #   Data         - $this   : The internal private object.
 #                  $syntax : A reference to the syntax tree that is to be
 #                            checked.
+#                  $seen   : A reference to a hash containing the unique
+#                            reference addresses of those containers that have
+#                            already been checked within the syntax tree.
 #
 ##############################################################################
 
 
 
-sub check_syntax_tree($this, $syntax)
+sub check_syntax_tree($this, $syntax, $seen = {})
 {
+
+    # Guard against infinite recursion due to loops in the syntax tree (which
+    # are allowed, e.g. cascading menu definitions).
+
+    return if (exists($seen->{refaddr($syntax)}));
+    $seen->{refaddr($syntax)} = undef;
 
     # Check arrays, these are not only lists but also branch points.
 
@@ -454,7 +464,7 @@ sub check_syntax_tree($this, $syntax)
             }
             else
             {
-                check_syntax_tree($this, $syn_el)
+                check_syntax_tree($this, $syn_el, $seen);
             }
         }
 
@@ -471,7 +481,7 @@ sub check_syntax_tree($this, $syntax)
             }
             else
             {
-                check_syntax_tree($this, $value);
+                check_syntax_tree($this, $value, $seen);
             }
         }
     }
