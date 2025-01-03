@@ -12,6 +12,7 @@ allow_if_string_contains_single_quote = 1
 [-ControlStructures::ProhibitCascadingIfElse]
 [-ControlStructures::ProhibitDeepNests]
 [-ControlStructures::ProhibitPostfixControls]
+[-Modules::ProhibitMultiplePackages]
 [-NamingConventions::Capitalization]
 [-References::ProhibitDoubleSigils]
 [-RegularExpressions::ProhibitEscapedMetacharacters]
