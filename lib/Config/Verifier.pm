@@ -50,9 +50,8 @@ use constant TYPED_FIELD_HASHES  => 0x04;
 
 use constant SCHEMA_ERROR => 'Illegal syntax element found in syntax tree ';
 
-# Structures for managing private objects.
+# Structure for managing private object data.
 
-my $Class_Name = __PACKAGE__;
 my %Class_Objects;
 
 # Whether debug messages should be logged or not.
@@ -143,19 +142,19 @@ sub DESTROY;
 
 sub check($self, $data, $name)
 {
-    my $this = $Class_Objects{$self->{$Class_Name}};
+    my $this = $Class_Objects{$self->{+__PACKAGE__}};
     my $status = '';
     verify_node($this, $data, $this->{syntax_tree}, $name, \$status);
     return $status;
 }
 sub match_syntax_value($self, $syntax, $value, $error_text = undef)
 {
-    my $this = $Class_Objects{$self->{$Class_Name}};
+    my $this = $Class_Objects{$self->{+__PACKAGE__}};
     return match_syntax($this, $syntax, $value, $error_text);
 }
 sub syntax_tree($self, $syntax_tree)
 {
-    my $this = $Class_Objects{$self->{$Class_Name}};
+    my $this = $Class_Objects{$self->{+__PACKAGE__}};
     check_syntax_tree($this, $syntax_tree);
     $this->{syntax_tree} = $syntax_tree;
     return;
@@ -167,7 +166,7 @@ sub debug($self, $value = undef)
 {
     my $old_value;
     my $this =
-        (ref($self) ne '') ? $Class_Objects{$self->{$Class_Name}} : undef;
+        (ref($self) ne '') ? $Class_Objects{$self->{+__PACKAGE__}} : undef;
     if (defined($this))
     {
         $old_value = $this->{debug};
@@ -240,7 +239,7 @@ sub new($class, $syntax_tree = {})
         throw('Exhausted unique object keys') if ($i == 0xffff);
     }
     $self = bless({}, $class);
-    $self->{$Class_Name} = $last_id;
+    $self->{+__PACKAGE__} = $last_id;
 
     # Now file the object's record in the records store, filed under the
     # object's unique key.
@@ -269,7 +268,7 @@ sub DESTROY($self)
     local $@;
     eval
     {
-        delete($Class_Objects{$self->{$Class_Name}});
+        delete($Class_Objects{$self->{+__PACKAGE__}});
     };
 
     return;
@@ -379,7 +378,7 @@ sub register_syntax_regex($self, $name, $regex)
     }
     else
     {
-        $regex_table = $Class_Objects{$self->{$Class_Name}}->{syntax_regexes};
+        $regex_table = $Class_Objects{$self->{+__PACKAGE__}}->{syntax_regexes};
     }
 
     # The name must be a simple variable like name and the regex pattern must be
