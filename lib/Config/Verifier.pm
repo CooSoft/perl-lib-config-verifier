@@ -388,7 +388,7 @@ sub register_syntax_regex($self, $name, $regex)
         if ($name !~ m/^[-[:alnum:]_.]+$/);
     throw('`%s\' is not anchored to the start and end of the string.', $regex)
         if ($regex !~ m/^\^.*\$$/);
-    if (exists($Capturing_Regexes{$name}))
+    if (exists($Capturing_Regexes{$name}) or $name eq 'boolean')
     {
         throw('Changing `%s\' is not permitted.', $name);
     }
@@ -1648,8 +1648,8 @@ detected.
 Registers the regular expression string C<$regex>, which is not a compiled RE
 object, as a syntax pattern under the name given in C<$name>. This is then
 available for use as C<'R:name'> just like the built in syntax patterns. This
-can be used to replace any built in pattern or extend the list of patterns. The
-regular expression must be anchored, i.e. start and end with C<^> and C<$>
+can be used to replace most built in patterns or extend the list of patterns.
+The regular expression must be anchored, i.e. start and end with C<^> and C<$>
 respectively.
 
 The new regular expression term either goes into the global default table, which

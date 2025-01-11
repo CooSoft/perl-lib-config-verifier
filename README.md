@@ -131,8 +131,8 @@ supports ini style configuration files, is [Config::Validator](https://metacpan.
     Registers the regular expression string `$regex`, which is not a compiled RE
     object, as a syntax pattern under the name given in `$name`. This is then
     available for use as `'R:name'` just like the built in syntax patterns. This
-    can be used to replace any built in pattern or extend the list of patterns. The
-    regular expression must be anchored, i.e. start and end with `^` and `$`
+    can be used to replace most built in patterns or extend the list of patterns.
+    The regular expression must be anchored, i.e. start and end with `^` and `$`
     respectively.
 
     The new regular expression term either goes into the global default table, which

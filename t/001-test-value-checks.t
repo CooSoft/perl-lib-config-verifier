@@ -267,6 +267,11 @@ exception_protect(sub { Config::Verifier->register_syntax_regex
 like($exception, qr/^Changing \S+ is not permitted\./,
      'Reserved built in regex [amount]');
 
+exception_protect(sub { Config::Verifier->register_syntax_regex
+                            ('boolean', '^[0-9]+$'); });
+like($exception, qr/^Changing \S+ is not permitted\./,
+     'Reserved built in regex [amount]');
+
 # Check conversion functions.
 
 my $result;
